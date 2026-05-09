@@ -13,7 +13,7 @@ Crea el archivo **`optishield.json`** en la raíz del proyecto con el siguiente 
 }
 ```
 
-**Sin este archivo el escudo NO funcionará.**
+**Sin este archivo el bot NO funcionará.**
 
 Si no tienes API Key → entra a [optishield.uk](https://optishield.uk/), regístrate, inicia sesión y contrátala desde el panel.
 
