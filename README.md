@@ -35,7 +35,7 @@
 
  Crea el archivo **`optishield.json`** en la raíz del proyecto con el siguiente contenido:
 
-```json
+``` json
  {
    "apikey": "TU APIKEY AQUI"
  }
@@ -60,4 +60,6 @@ OptiShield_Custom/
 ├── optishield.json    ← TU API KEY AQUÍ
 ├── shield.js
 └── shield.css
+```
+
 ```
