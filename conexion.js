@@ -10,31 +10,15 @@ import {
 import qrcode from 'qrcode-terminal';
 import NodeCache from 'node-cache';
 
+// Logger completamente silencioso para evitar basura en consola
 const logger = pino({ level: 'silent' });
 
-const connectionOptions = {
-  logger,
-  printQRInTerminal: false,
-  browser: ["Ubuntu", "Chrome", "22.04"],
-  markOnlineOnConnect: false,
-  generateHighQualityLinkPreview: true,
-  syncFullHistory: false,
-  getMessage: async () => ({ conversation: '' }),
-  msgRetryCounterCache: new NodeCache({ stdTTL: 0, checkperiod: 0 }),
-  userDevicesCache: new NodeCache({ stdTTL: 0, checkperiod: 0 }),
-  keepAliveIntervalMs: 55000,
-  maxIdleTimeMs: 60000,
-};
+const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
+const userDevicesCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
 
 async function startConnection() {
   const { state, saveCreds } = await useMultiFileAuthState('./session');
   const { version } = await fetchLatestBaileysVersion();
-
-  connectionOptions.version = version;
-  connectionOptions.auth = {
-    creds: state.creds,
-    keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' })),
-  };
 
   let pendingQR = null;
   let waitingDecision = true;
@@ -87,6 +71,7 @@ async function startConnection() {
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
+      
       if (code === DisconnectReason.loggedOut) {
         console.log('❌ Sesión cerrada remotamente, elimina la carpeta /session y vuelve a iniciar.');
         process.exit(1);
@@ -94,13 +79,13 @@ async function startConnection() {
       }
       
       if (reconnectAttempts >= maxReconnectAttempts) {
-        console.log(`❌ Se excedió el máximo de intentos de reconexión (${maxReconnectAttempts}). Saliendo...`);
+        console.log(`❌ Máximo de reconexiones alcanzado (${maxReconnectAttempts}). Saliendo...`);
         process.exit(1);
         return;
       }
       
       reconnectAttempts++;
-      console.log(`⏳ Conexión cerrada (${code}). Reconectando en 3 segundos... (Intento ${reconnectAttempts}/${maxReconnectAttempts})`);
+      console.log(`⏳ Conexión cerrada (${code || 'Desconocido'}). Reconectando en 3s... (${reconnectAttempts}/${maxReconnectAttempts})`);
       await new Promise(r => setTimeout(r, 3000));
       global.reloadHandler(true);
     }
@@ -114,15 +99,36 @@ async function startConnection() {
     }
   };
 
+  // Función para crear el socket limpiamente sin mutar opciones
+  const createSocket = () => makeWASocket({
+    version,
+    logger,
+    printQRInTerminal: false,
+    browser: ["Ubuntu", "Chrome", "22.04"],
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: true,
+    syncFullHistory: false,
+    getMessage: async () => ({ conversation: '' }),
+    msgRetryCounterCache,
+    userDevicesCache,
+    keepAliveIntervalMs: 55000,
+    maxIdleTimeMs: 60000,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
+  });
+
   global.reloadHandler = async (restartConn) => {
     try {
       const { handleEvents } = await import(`./handler.js?update=${Date.now()}`);
       
       if (restartConn) {
-        const oldChats = global.conn.chats;
-        try { global.conn.ws.close(); } catch {}
-        global.conn.ev.removeAllListeners();
-        global.conn = makeWASocket(connectionOptions, { chats: oldChats });
+        const oldChats = global.conn?.chats || {};
+        try { global.conn?.ws?.close(); } catch {}
+        try { global.conn?.ev?.removeAllListeners(); } catch {}
+        
+        global.conn = createSocket();
         global.conn.ev.on('connection.update', connectionUpdate);
         global.conn.ev.on('creds.update', saveCreds);
       }
@@ -130,12 +136,12 @@ async function startConnection() {
       handleEvents(global.conn, global.commandsMap);
       return true;
     } catch (e) {
-      console.error('❌ Error en reloadHandler:', e);
+      console.error('❌ Error en reloadHandler:', e.message);
       return false;
     }
   };
 
-  global.conn = makeWASocket(connectionOptions);
+  global.conn = createSocket();
 
   global.conn.ev.on('connection.update', connectionUpdate);
   global.conn.ev.on('creds.update', saveCreds);
