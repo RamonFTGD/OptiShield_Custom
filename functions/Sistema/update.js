@@ -14,8 +14,7 @@ const ALLOWED_NUMBERS = global.owners
 
 function isOwner(sender) {
   if (!sender) return false;
-  const number = sender.split(':')[0];
-  return ALLOWED_NUMBERS.some(n => n.split(':')[0] === number);
+  return ALLOWED_NUMBERS === sender;
 }
 
 function getGitRemoteUrl() {
