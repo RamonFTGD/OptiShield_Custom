@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -14,8 +14,7 @@ const ALLOWED_NUMBERS = global.owners
 
 function isOwner(sender) {
   if (!sender) return false;
-  console.log(sender)
-  console.log(ALLOWED_NUMBERS)
+  if (!Array.isArray(ALLOWED_NUMBERS)) return false;
   return ALLOWED_NUMBERS.includes(sender);
 }
 
@@ -55,6 +54,30 @@ function executeCommand(command, options = {}) {
       output: error.stderr?.trim() || error.message 
     };
   }
+}
+
+function restartProcess() {
+  console.log('🔄 Levantando nueva instancia del bot...');
+  
+  // Obtener cómo se inició el bot (node index.js, node ., etc)
+  const args = process.argv.slice(1);
+  
+  // Lanzar nueva instancia desacoplada
+  const child = spawn(process.argv[0], args, {
+    detached: true,
+    stdio: 'ignore',
+    cwd: process.cwd(),
+    env: process.env
+  });
+
+  // Desacoplar del proceso padre para que no muera si el padre muere
+  child.unref();
+
+  console.log('✅ Nueva instancia lanzada (PID:', child.pid, ')');
+  console.log('⛔ Cerrando instancia vieja...');
+  
+  // Cerrar esta instancia
+  process.exit(0);
 }
 
 export default async function (msg, sock, ctx) {
@@ -112,7 +135,6 @@ export default async function (msg, sock, ctx) {
     const cloneResult = executeCommand(`git clone ${urlToUse} . --force 2>&1`);
     
     if (!cloneResult.success) {
-
       executeCommand('rm -rf temp_update_clone 2>/dev/null');
       const altResult = executeCommand(`git clone ${urlToUse} temp_update_clone 2>&1`);
       
@@ -130,7 +152,6 @@ export default async function (msg, sock, ctx) {
     }
 
   } else {
-
     updateText += `📦 *Modo:* Git Pull\n`;
     updateText += `🔗 *Remote:* ${remoteUrl}\n\n`;
     updateText += `⏳ Obteniendo cambios...\n`;
@@ -150,7 +171,6 @@ export default async function (msg, sock, ctx) {
         updateText += `📝 *Sin cambios nuevos*\n\n`;
       }
     } else {
-
       updateText += `⚠️ Pull con problemas, forzando actualización...\n`;
       await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
       
@@ -193,8 +213,6 @@ export default async function (msg, sock, ctx) {
   await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
   await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } }).catch(() => {});
 
-  setTimeout(() => {
-    console.log('🔄 Reiniciando bot por actualización...');
-    process.exit(1);
-  }, 3000);
+  // Reinicio real: levanta nuevo proceso y cierra este
+  setTimeout(restartProcess, 3000);
 }
