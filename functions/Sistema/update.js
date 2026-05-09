@@ -10,12 +10,11 @@ export const meta = {
   desc: 'Actualiza el bot desde el repositorio y lo reinicia',
 }
 
-// Lista de números permitidos (OWNER) - Cambia esto por tu número
 const ALLOWED_NUMBERS = global.owners
 
 function isOwner(sender) {
   if (!sender) return false;
-  const number = sender.split(':')[0]; // Quita :0 o :1 del final
+  const number = sender.split(':')[0];
   return ALLOWED_NUMBERS.some(n => n.split(':')[0] === number);
 }
 
@@ -60,7 +59,6 @@ function executeCommand(command, options = {}) {
 export default async function (msg, sock, ctx) {
   const { chatId, sender, args } = ctx;
 
-  // Verificar si es owner (con protección contra undefined)
   if (!isOwner(sender)) {
     return sock.sendMessage(
       chatId, 
@@ -71,12 +69,10 @@ export default async function (msg, sock, ctx) {
 
   await sock.sendMessage(chatId, { react: { text: '⏳', key: msg.key } }).catch(() => {});
 
-  // Verificar flags
   const forceClone = args.includes('--force') || args.includes('-f');
   const noInstall = args.includes('--no-install') || args.includes('-n');
   const repoUrl = args.find(a => a.startsWith('http')) || null;
 
-  // === FASE 1: Verificación ===
   let statusMsg = await sock.sendMessage(
     chatId,
     { text: `🔄 *ACTUALIZANDO BOT...*\n\n⏳ Verificando estado del repositorio...` },
@@ -88,7 +84,6 @@ export default async function (msg, sock, ctx) {
 
   let updateText = `🔄 *ACTUALIZANDO BOT...*\n\n`;
 
-  // === FASE 2: Git Pull o Git Clone ===
   if (!gitRepo || forceClone) {
     const urlToUse = repoUrl || remoteUrl;
     
@@ -109,7 +104,6 @@ export default async function (msg, sock, ctx) {
     
     await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
 
-    // Limpiar directorio primero si es forzado
     if (forceClone) {
       executeCommand('rm -rf .git 2>/dev/null');
     }
@@ -117,7 +111,7 @@ export default async function (msg, sock, ctx) {
     const cloneResult = executeCommand(`git clone ${urlToUse} . --force 2>&1`);
     
     if (!cloneResult.success) {
-      // Intentar clonar en carpeta temporal y copiar
+
       executeCommand('rm -rf temp_update_clone 2>/dev/null');
       const altResult = executeCommand(`git clone ${urlToUse} temp_update_clone 2>&1`);
       
@@ -135,14 +129,13 @@ export default async function (msg, sock, ctx) {
     }
 
   } else {
-    // Git Pull normal
+
     updateText += `📦 *Modo:* Git Pull\n`;
     updateText += `🔗 *Remote:* ${remoteUrl}\n\n`;
     updateText += `⏳ Obteniendo cambios...\n`;
     
     await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
 
-    // Obtener rama actual
     const branchResult = executeCommand('git rev-parse --abbrev-ref HEAD');
     const branch = branchResult.success ? branchResult.output : 'main';
 
@@ -156,7 +149,7 @@ export default async function (msg, sock, ctx) {
         updateText += `📝 *Sin cambios nuevos*\n\n`;
       }
     } else {
-      // Intentar reset hard si falla el pull
+
       updateText += `⚠️ Pull con problemas, forzando actualización...\n`;
       await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
       
@@ -173,7 +166,6 @@ export default async function (msg, sock, ctx) {
     }
   }
 
-  // === FASE 3: Instalar dependencias ===
   if (!noInstall && fs.existsSync(path.join(process.cwd(), 'package.json'))) {
     updateText += `📦 *Instalando dependencias...*\n`;
     await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
@@ -191,7 +183,6 @@ export default async function (msg, sock, ctx) {
     updateText += `⏭️ *No se encontró package.json*\n\n`;
   }
 
-  // === FASE 4: Reinicio ===
   updateText += 
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `✅ *Actualización completada*\n\n` +
@@ -201,7 +192,6 @@ export default async function (msg, sock, ctx) {
   await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
   await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } }).catch(() => {});
 
-  // Reiniciar
   setTimeout(() => {
     console.log('🔄 Reiniciando bot por actualización...');
     process.exit(1);
