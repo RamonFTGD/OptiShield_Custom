@@ -1,16 +1,6 @@
 ```markdown
 # OptiShield Custom
 
-<div align="center">
-
-![OptiShield Custom](https://capsule-render.vercel.app/api?type=waving&color=0a0e17&height=120&section=header&text=OptiShield%20Custom&fontSize=36&fontColor=00ff88&animation=fadeIn&fontAlignY=32)
-
-| 🔒 Protección | ⚡ Ligero | 🎨 Custom |
-|:---:|:---:|:---:|
-| Anti-bot en tiempo real | Sin dependencias pesadas | 100% personalizable |
-
-</div>
-
 ---
 
 ## ⚠️ CONFIGURACIÓN OBLIGATORIA
