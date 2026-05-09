@@ -10,6 +10,7 @@ if (!global.OptiShield?.db) {
   console.error('❌ CRÍTICO: OptiShield.db() no se cargó correctamente en global.OptiShield.');
   process.exit(1);
 }
+global.owners = [ "523142183828@s.whatsapp.net" ]
 
 console.log('✅ OptiShield.db() detectado y vinculado a global.OptiShield.');
 
