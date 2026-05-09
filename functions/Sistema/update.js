@@ -1,4 +1,4 @@
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -54,10 +54,6 @@ function executeCommand(command, options = {}) {
       output: error.stderr?.trim() || error.message 
     };
   }
-}
-
-function restartProcess() {
-  process.exit(0);
 }
 
 export default async function (msg, sock, ctx) {
@@ -193,6 +189,8 @@ export default async function (msg, sock, ctx) {
   await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
   await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } }).catch(() => {});
 
-  // Reinicio real: levanta nuevo proceso y cierra este
-  setTimeout(restartProcess, 3000);
+  setTimeout(() => {
+    console.log('🔄 Reiniciando bot por actualización...');
+    process.exit(1);
+  }, 3000);
 }
