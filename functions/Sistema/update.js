@@ -56,6 +56,36 @@ function executeCommand(command, options = {}) {
   }
 }
 
+function protectConfig() {
+  const configPath = path.join(process.cwd(), 'optishield.json');
+  let backupConfig = null;
+  
+  if (fs.existsSync(configPath)) {
+    try {
+      backupConfig = fs.readFileSync(configPath, 'utf-8');
+      console.log('🛡️ [UPDATE] Respaldo de optishield.json guardado en memoria.');
+    } catch (e) {
+      console.error('⚠️ [UPDATE] No se pudo leer optishield.json para respaldarlo.');
+    }
+  }
+  
+  return { configPath, backupConfig };
+}
+
+function restoreConfig({ configPath, backupConfig }) {
+  if (backupConfig) {
+    try {
+      fs.writeFileSync(configPath, backupConfig, 'utf-8');
+      console.log('✅ [UPDATE] optishield.json restaurado exitosamente.');
+      return true;
+    } catch (e) {
+      console.error('❌ [UPDATE] Error crítico: No se pudo restaurar optishield.json!!!', e.message);
+      return false;
+    }
+  }
+  return false;
+}
+
 export default async function (msg, sock, ctx) {
   const { chatId, sender, args } = ctx;
 
@@ -81,8 +111,9 @@ export default async function (msg, sock, ctx) {
 
   const gitRepo = isGitRepo();
   const remoteUrl = getGitRemoteUrl();
-
   let updateText = `🔄 *ACTUALIZANDO BOT...*\n\n`;
+
+  const configBackup = protectConfig();
 
   if (!gitRepo || forceClone) {
     const urlToUse = repoUrl || remoteUrl;
@@ -127,6 +158,10 @@ export default async function (msg, sock, ctx) {
       updateText += `✅ *Clonado exitoso*\n\n`;
     }
 
+    if (restoreConfig(configBackup)) {
+      updateText += `🛡️ *Archivo optishield.json protegido y restaurado*\n\n`;
+    }
+
   } else {
     updateText += `📦 *Modo:* Git Pull\n`;
     updateText += `🔗 *Remote:* ${remoteUrl}\n\n`;
@@ -155,6 +190,10 @@ export default async function (msg, sock, ctx) {
       
       if (resetResult.success) {
         updateText += `✅ *Forzado exitoso*\n\n`;
+        
+        if (restoreConfig(configBackup)) {
+          updateText += `🛡️ *Archivo optishield.json protegido y restaurado*\n\n`;
+        }
       } else {
         updateText += `❌ *Error al actualizar:*\n\`\`\`${resetResult.output.slice(-300)}\`\`\`\n\n`;
         await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
