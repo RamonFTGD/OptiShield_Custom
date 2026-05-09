@@ -14,7 +14,9 @@ const ALLOWED_NUMBERS = global.owners
 
 function isOwner(sender) {
   if (!sender) return false;
-  return ALLOWED_NUMBERS === sender;
+  console.log(sender)
+  console.log(ALLOWED_NUMBERS)
+  return ALLOWED_NUMBERS == sender;
 }
 
 function getGitRemoteUrl() {
