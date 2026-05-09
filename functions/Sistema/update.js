@@ -57,26 +57,6 @@ function executeCommand(command, options = {}) {
 }
 
 function restartProcess() {
-  console.log('🔄 Levantando nueva instancia del bot...');
-  
-  // Obtener cómo se inició el bot (node index.js, node ., etc)
-  const args = process.argv.slice(1);
-  
-  // Lanzar nueva instancia desacoplada
-  const child = spawn(process.argv[0], args, {
-    detached: true,
-    stdio: 'ignore',
-    cwd: process.cwd(),
-    env: process.env
-  });
-
-  // Desacoplar del proceso padre para que no muera si el padre muere
-  child.unref();
-
-  console.log('✅ Nueva instancia lanzada (PID:', child.pid, ')');
-  console.log('⛔ Cerrando instancia vieja...');
-  
-  // Cerrar esta instancia
   process.exit(0);
 }
 
