@@ -16,7 +16,7 @@ function isOwner(sender) {
   if (!sender) return false;
   console.log(sender)
   console.log(ALLOWED_NUMBERS)
-  return ALLOWED_NUMBERS == sender;
+  return ALLOWED_NUMBERS.includes(sender);
 }
 
 function getGitRemoteUrl() {
