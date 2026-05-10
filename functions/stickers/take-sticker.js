@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { downloadContentFromMessage } from '@whiskeysockets/baileys'
-import { addExif } from '../lib/sticker.js'
+import { addExif } from '../../lib/sticker.js'
 
 export const meta = {
   name: 'take-sticker',
