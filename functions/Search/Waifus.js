@@ -1,146 +1,161 @@
-import sharp from 'sharp'
-import { spawn } from 'child_process'
-import { downloadContentFromMessage } from '@whiskeysockets/baileys'
-
-async function downloadMedia(message, type) {
-    try {
-        const stream = await downloadContentFromMessage(message, type, {}, { timeoutMs: 120_000 })
-        const chunks = []
-        for await (const chunk of stream) chunks.push(chunk)
-        const buffer = Buffer.concat(chunks)
-        if (!buffer.length) throw new Error('Buffer vacío')
-        return buffer
-    } catch (err) {
-        console.error('❌ Error descargando media:', err.message)
-        throw new Error('NO_DOWNLOAD')
-    }
-}
-
-function runFfmpeg(args, inputBuffer) {
-    return new Promise((resolve, reject) => {
-        const proc = spawn('ffmpeg', args)
-        
-        const chunks = []
-        proc.stdout.on('data', (chunk) => chunks.push(chunk))
-        
-        let stderr = ''
-        proc.stderr.on('data', (data) => {
-            stderr += data.toString()
-        })
-        
-        proc.on('close', (code) => {
-            if (code !== 0) {
-                reject(new Error(`FFmpeg code ${code}: ${stderr.slice(-500)}`))
-            } else {
-                resolve(Buffer.concat(chunks))
-            }
-        })
-        
-        proc.on('error', reject)
-        
-
-        proc.stdin.on('error', () => {})
-        
-        proc.stdin.write(inputBuffer)
-        proc.stdin.end()
-    })
-}
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const { sendInteractiveMessage } = require('gifted-btns')
 
 export const meta = {
-    name: 'ver',
-    commands: ['ver', 'revelar'],
-    priority: 4,
-    class: 'Herramientas',
+  name: 'Waifu',
+  commands: ['waifu', 'waifus'],
+  priority: 5,
+  class: 'Buscadores',
+  public: true,
+  premium: true
 }
 
-function getQuoted(msg) {
-    return msg.message?.extendedTextMessage?.contextInfo || null
-}
+const WAIFUS = [
+  { name: 'Rem',              series: 'Re:Zero',                      age: 17           },
+  { name: 'Ram',              series: 'Re:Zero',                      age: 17           },
+  { name: 'Asuna',            series: 'Sword Art Online',             age: 17           },
+  { name: 'Nezuko',           series: 'Demon Slayer',                 age: 14           },
+  { name: 'Hinata',           series: 'Naruto',                       age: 16           },
+  { name: 'Mikasa',           series: 'Attack on Titan',              age: 19           },
+  { name: 'Zero Two',         series: 'Darling in the FranXX',        age: 17           },
+  { name: 'Marin Kitagawa',   series: 'My Dress-Up Darling',          age: 15           },
+  { name: 'Yor Forger',       series: 'Spy x Family',                 age: 27           },
+  { name: 'Makima',           series: 'Chainsaw Man',                 age: 'Desconocida'},
+  { name: 'Power',            series: 'Chainsaw Man',                 age: 'Desconocida'},
+  { name: 'Mai Sakurajima',   series: 'Bunny Girl Senpai',            age: 16           },
+  { name: 'Kaguya Shinomiya', series: 'Kaguya-sama',                  age: 17           },
+  { name: 'Chika Fujiwara',   series: 'Kaguya-sama',                  age: 16           },
+  { name: 'Nami',             series: 'One Piece',                    age: 20           },
+  { name: 'Nico Robin',       series: 'One Piece',                    age: 30           },
+  { name: 'Emilia',           series: 'Re:Zero',                      age: 18           },
+  { name: 'Kurisu Makise',    series: 'Steins;Gate',                  age: 18           },
+  { name: 'Violet Evergarden',series: 'Violet Evergarden',            age: 14           },
+  { name: 'C.C.',             series: 'Code Geass',                   age: 'Inmortal'   },
+  { name: 'Erza Scarlet',     series: 'Fairy Tail',                   age: 19           },
+  { name: 'Lucy Heartfilia',  series: 'Fairy Tail',                   age: 17           },
+  { name: 'Miku Nakano',      series: 'The Quintessential Quintuplets', age: 17         },
+  { name: 'Nino Nakano',      series: 'The Quintessential Quintuplets', age: 17         },
+  { name: 'Itsuki Nakano',    series: 'The Quintessential Quintuplets', age: 17         },
+  { name: 'Shoko Nishimiya',  series: 'A Silent Voice',               age: 17           },
+  { name: 'Rias Gremory',     series: 'High School DxD',              age: 18           },
+  { name: 'Aqua',             series: 'KonoSuba',                     age: 'Diosa'      },
+  { name: 'Megumin',          series: 'KonoSuba',                     age: 14           },
+  { name: 'Darkness',         series: 'KonoSuba',                     age: 18           },
+]
 
 export default async function (msg, sock, ctx) {
-    const chatId = msg.key.remoteJid
+  const jid    = msg.key.remoteJid
+  const query  = ctx.args.join(' ').trim()
+  const apikey = ctx?.info?.user?.apikey
 
-    const context = getQuoted(msg)
-    if (!context?.quotedMessage) {
-        await sock.sendMessage(chatId, { text: '❌ Debes responder a una imagen, video o audio' }, { quoted: msg })
-        return true
-    }
-
-    let quoted = context.quotedMessage
-    if (quoted.viewOnceMessageV2) quoted = quoted.viewOnceMessageV2.message
-    else if (quoted.viewOnceMessage) quoted = quoted.viewOnceMessage.message
-
-    const quotedText =
-        quoted.imageMessage?.caption ||
-        quoted.videoMessage?.caption ||
-        quoted.extendedTextMessage?.text || ''
-
-    
-    if (quoted.imageMessage) {
-        try {
-            const buffer = await downloadMedia(quoted.imageMessage, 'image')
-            const output = await sharp(buffer).jpeg({ quality: 90 }).toBuffer()
-            await sock.sendMessage(chatId, { image: output, caption: quotedText }, { quoted: msg })
-        } catch (e) {
-            console.error(e)
-            await sock.sendMessage(chatId, { text: '❌ Error revelando imagen' }, { quoted: msg })
-        }
-        return true
-    }
-
-    
-    if (quoted.videoMessage) {
-        try {
-            const buffer = await downloadMedia(quoted.videoMessage, 'video')
-
-            const output = await runFfmpeg([
-                '-y',
-                '-i', 'pipe:0',
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',
-                '-c:a', 'aac',
-                '-b:a', '128k',
-                '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-                '-pix_fmt', 'yuv420p',
-                '-f', 'mp4',
-                'pipe:1'
-            ], buffer)
-
-            await sock.sendMessage(chatId, { video: output, caption: quotedText || '' }, { quoted: msg })
-        } catch (e) {
-            console.error(e)
-            await sock.sendMessage(chatId, {
-                text: '❌ No se pudo revelar el video\n⚠️ Posibles causas:\n• El video expiró\n• Es demasiado pesado\n• WhatsApp bloqueó la descarga'
-            }, { quoted: msg })
-        }
-        return true
-    }
-
-    
-    if (quoted.audioMessage) {
-        try {
-            const buffer = await downloadMedia(quoted.audioMessage, 'audio')
-
-            const output = await runFfmpeg([
-                '-y',
-                '-i', 'pipe:0',
-                '-vn',
-                '-ar', '44100',
-                '-ac', '2',
-                '-b:a', '192k',
-                '-f', 'mp3',
-                'pipe:1'
-            ], buffer)
-
-            await sock.sendMessage(chatId, { audio: output, mimetype: 'audio/mpeg', ptt: false }, { quoted: msg })
-        } catch (e) {
-            console.error(e)
-            await sock.sendMessage(chatId, { text: '❌ Error revelando audio' }, { quoted: msg })
-        }
-        return true
-    }
-
-    await sock.sendMessage(chatId, { text: '❌ El mensaje no contiene media compatible' }, { quoted: msg })
+  if (!apikey) {
+    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
     return true
+  }
+
+  if (!query) {
+    const chunkSize = 10
+    const sections  = []
+
+    for (let i = 0; i < WAIFUS.length; i += chunkSize) {
+      const chunk = WAIFUS.slice(i, i + chunkSize)
+      sections.push({
+        title: `💕 Waifus ${i + 1}–${i + chunk.length}`,
+        rows: chunk.map(w => ({
+          id: `.waifu ${w.name}`,
+          title: `💕 ${w.name}`,
+          description: `${w.series} • 🎂 ${w.age}`
+        }))
+      })
+    }
+
+    await sendInteractiveMessage(sock, jid, {
+      title: '💕 Waifu List',
+      text:
+        `💕 *LISTA DE WAIFUS*\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📊 *${WAIFUS.length} waifus disponibles*\n\n` +
+        `Selecciona una para ver su imagen o escribe:\n` +
+        `*.waifu <nombre>* para búsqueda personalizada`,
+      footer: 'OptiShield • Waifu Search ❤️',
+      interactiveButtons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: '💕 Elegir waifu',
+            sections
+          })
+        }
+      ]
+    })
+
+    return true
+  }
+
+  const statusMsg = await sock.sendMessage(jid, {
+    text: `⏳ Buscando a *${query}*...`
+  }, { quoted: msg })
+  const edit = async (text) => { try { await sock.sendMessage(jid, { text, edit: statusMsg.key }) } catch { } }
+
+  try {
+    const res = await global.OptiShield.callApi('pinterestSearch', { query: `${query} anime waifu`, apikey })
+
+    if (res.error || !res?.result?.ok || !res.result.results?.length) {
+      await edit(`❌ No se encontraron resultados para *"${query}"*\n\n💡 Usa *.waifu* para ver la lista`)
+      return true
+    }
+
+    const images = res.result.results.filter(r => typeof r.archivo === 'string' && !r.video)
+    if (!images.length) {
+      await edit(`⚠️ No hay imágenes válidas para *"${query}"*`)
+      return true
+    }
+
+    const randomImage = images[Math.floor(Math.random() * images.length)]
+    const waifuInfo   = WAIFUS.find(w =>
+      w.name.toLowerCase().includes(query.toLowerCase()) ||
+      query.toLowerCase().includes(w.name.toLowerCase())
+    )
+
+    await edit('✅ Imagen encontrada...')
+
+    await sendInteractiveMessage(sock, jid, {
+      title: waifuInfo ? waifuInfo.name : query,
+      text:
+        `💕 *${waifuInfo ? waifuInfo.name : query}*\n\n` +
+        `${waifuInfo ? `📺 *Serie:* ${waifuInfo.series}\n🎂 *Edad:* ${waifuInfo.age}\n` : `🔍 Búsqueda personalizada\n`}\n` +
+        `_¿Qué quieres hacer con esta imagen?_`,
+      footer: 'OptiShield • Waifu Search ❤️',
+      interactiveButtons: [
+        {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({
+            display_text: '📷 Ver imagen',
+            id: `.pin_image ${randomImage.archivo}`
+          })
+        },
+        {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({
+            display_text: '🎨 Hacer sticker',
+            id: `.sticker ${randomImage.archivo}`
+          })
+        },
+        {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({
+            display_text: '🔁 Otra imagen',
+            id: `.waifu ${query}`
+          })
+        }
+      ]
+    })
+
+  } catch (err) {
+    console.error('❌ waifu error:', err)
+    await edit(`❌ Error: ${err.message}`)
+  }
+
+  return true
 }
