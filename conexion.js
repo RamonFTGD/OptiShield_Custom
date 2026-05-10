@@ -1,5 +1,7 @@
 import pino from 'pino';
 import readline from 'readline';
+import fs from 'fs';
+import path from 'path';
 import { 
   makeWASocket, 
   useMultiFileAuthState, 
@@ -13,6 +15,83 @@ import NodeCache from 'node-cache';
 const logger = pino({ level: 'silent' });
 const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
 const userDevicesCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
+
+const STORE_FILE = './session/store.json';
+
+// Store manual (makeInMemoryStore fue eliminado de baileys)
+const store = {
+  chats: {},
+  messages: {},
+  load() {
+    try {
+      if (fs.existsSync(STORE_FILE)) {
+        const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
+        this.chats = data.chats || {};
+        this.messages = data.messages || {};
+      }
+    } catch {}
+  },
+  save() {
+    try {
+      fs.writeFileSync(STORE_FILE, JSON.stringify({ chats: this.chats, messages: this.messages }));
+    } catch {}
+  },
+  bind(ev) {
+    ev.on('chats.set', ({ chats }) => {
+      for (const c of chats) this.chats[c.id] = c;
+    });
+    ev.on('chats.update', (updates) => {
+      for (const u of updates) {
+        if (!this.chats[u.id]) this.chats[u.id] = { id: u.id };
+        Object.assign(this.chats[u.id], u);
+      }
+    });
+    ev.on('chats.delete', (deletions) => {
+      for (const id of deletions) delete this.chats[id];
+    });
+    ev.on('messages.set', ({ messages }) => {
+      for (const m of messages) {
+        const jid = m.key.remoteJid;
+        if (!jid) continue;
+        if (!this.messages[jid]) this.messages[jid] = {};
+        this.messages[jid][m.key.id] = m;
+      }
+    });
+    ev.on('messages.upsert', ({ messages, type }) => {
+      for (const m of messages) {
+        const jid = m.key.remoteJid;
+        if (!jid) continue;
+        if (!this.messages[jid]) this.messages[jid] = {};
+        this.messages[jid][m.key.id] = m;
+      }
+    });
+    ev.on('messages.update', (updates) => {
+      for (const u of updates) {
+        const jid = u.key.remoteJid;
+        const id = u.key.id;
+        if (!jid || !id || !this.messages[jid]?.[id]) continue;
+        Object.assign(this.messages[jid][id], u.update);
+      }
+    });
+    ev.on('messages.delete', (deletions) => {
+      for (const d of deletions) {
+        if (d.keys) {
+          for (const k of d.keys) {
+            if (this.messages[k.remoteJid]?.[k.id]) delete this.messages[k.remoteJid][k.id];
+          }
+        } else if (d.jid) {
+          delete this.messages[d.jid];
+        }
+      }
+    });
+  },
+  loadMessage(jid, id) {
+    return this.messages[jid]?.[id] || null;
+  }
+};
+
+store.load();
+setInterval(() => store.save(), 10000);
 
 function purgeClosedSessions(keys) {
   if (!keys?.sessions) return;
@@ -89,31 +168,39 @@ async function startConnection() {
 
     if (connection === 'open') {
       reconnecting = false;
-      console.log('✅ Conectado.');
+      console.log('✅ Conectado. Sincronizando historial...');
       try { await global.conn.sendQueuedMessages(); } catch {}
     }
   };
 
-  const createSocket = () => makeWASocket({
-    version,
-    logger,
-    printQRInTerminal: false,
-    browser: ["Ubuntu", "Chrome", "22.04"],
-    markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
-    syncFullHistory: false,
-    getMessage: async () => ({ conversation: '' }),
-    msgRetryCounterCache,
-    userDevicesCache,
-    keepAliveIntervalMs: 25000,
-    maxIdleTimeMs: 120000,
-    retryRequestDelayMs: 100,
-    maxMsgRetryCount: 3,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-  });
+  const createSocket = () => {
+    const sock = makeWASocket({
+      version,
+      logger,
+      printQRInTerminal: false,
+      browser: ["Ubuntu", "Chrome", "22.04"],
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false,
+      syncFullHistory: true,
+      getMessage: async (key) => {
+        const msg = store.loadMessage(key.remoteJid, key.id);
+        return msg || { conversation: '' };
+      },
+      msgRetryCounterCache,
+      userDevicesCache,
+      keepAliveIntervalMs: 25000,
+      maxIdleTimeMs: 120000,
+      retryRequestDelayMs: 100,
+      maxMsgRetryCount: 3,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+    });
+
+    store.bind(sock.ev);
+    return sock;
+  };
 
   global.reloadHandler = async (restartConn) => {
     try {
@@ -130,6 +217,7 @@ async function startConnection() {
         global.conn.chats = oldChats;
       }
       
+      global.store = store;
       handleEvents(global.conn, global.commandsMap);
       return true;
     } catch (e) {
@@ -147,7 +235,7 @@ async function startConnection() {
     await askPairingCode();
   }
 
-  return { sock: global.conn, store: {} };
+  return { sock: global.conn, store };
 }
 
 export { startConnection };
