@@ -16,7 +16,6 @@ export default async function (msg, sock, ctx) {
   const apikey = ctx?.info?.user?.apikey
   const reply = (text) => sock.sendMessage(jid, { text }, { quoted: msg })
 
-  if (!apikey) return reply('▸ No tienes API Key válida.')
   if (!query) return reply('▸ Debes escribir algo. Ejemplo: .amsearch Blinding Lights')
 
   const statusMsg = await reply(`Buscando "${query}" en Apple Music...`)
