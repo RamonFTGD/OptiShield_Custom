@@ -10,20 +10,27 @@ import {
 import qrcode from 'qrcode-terminal';
 import NodeCache from 'node-cache';
 
-// Logger completamente silencioso para evitar basura en consola
 const logger = pino({ level: 'silent' });
-
 const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
 const userDevicesCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
 
+function purgeClosedSessions(keys) {
+  if (!keys?.sessions) return;
+  for (const jid in keys.sessions) {
+    if (Array.isArray(keys.sessions[jid])) {
+      keys.sessions[jid] = keys.sessions[jid].filter(s => !s?.indexInfo?.closed || s.indexInfo.closed <= 0);
+    }
+  }
+}
+
 async function startConnection() {
   const { state, saveCreds } = await useMultiFileAuthState('./session');
+  purgeClosedSessions(state.keys);
+  
   const { version } = await fetchLatestBaileysVersion();
-
   let pendingQR = null;
   let waitingDecision = true;
-  let reconnectAttempts = 0;
-  const maxReconnectAttempts = 5;
+  let reconnecting = false;
 
   const showQR = (qr) => {
     console.log('═══════════════════════════════════════');
@@ -35,18 +42,15 @@ async function startConnection() {
   const askPairingCode = () => {
     return new Promise((resolve) => {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question('📱 ¿Quieres vincularte con un código de 8 dígitos? (y/n): ', (answer) => {
+      rl.question('📱 ¿Vincular con código de 8 dígitos? (y/n): ', (answer) => {
         waitingDecision = false;
         if (answer.toLowerCase() === 'y') {
-          rl.question('🔢 Escribe tu número de teléfono (con código de país, ej: 521234567890): ', async (number) => {
+          rl.question('🔢 Número con código de país (ej: 521234567890): ', async (number) => {
             rl.close();
             try {
-              const cleanNumber = number.replace(/[^0-9]/g, '');
-              const code = await global.conn.requestPairingCode(cleanNumber);
-              console.log(`\n🟢 Tu código de vinculación es: ${code}\n`);
-            } catch (error) {
-              console.error('❌ Error al generar el código:', error);
-            }
+              const code = await global.conn.requestPairingCode(number.replace(/[^0-9]/g, ''));
+              console.log(`\n🟢 Código: ${code}\n`);
+            } catch (e) { console.error('❌ Error:', e.message); }
             resolve(false);
           });
         } else {
@@ -62,57 +66,49 @@ async function startConnection() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      if (waitingDecision) {
-        pendingQR = qr;
-      } else {
-        showQR(qr);
-      }
+      if (waitingDecision) pendingQR = qr;
+      else showQR(qr);
     }
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
       
       if (code === DisconnectReason.loggedOut) {
-        console.log('❌ Sesión cerrada remotamente, elimina la carpeta /session y vuelve a iniciar.');
+        console.log('❌ Sesión cerrada. Elimina /session y reinicia.');
         process.exit(1);
         return;
       }
-      
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        console.log(`❌ Máximo de reconexiones alcanzado (${maxReconnectAttempts}). Saliendo...`);
-        process.exit(1);
-        return;
+
+      if (!reconnecting) {
+        reconnecting = true;
+        purgeClosedSessions(state.keys);
+        console.log(`⏳ Reconectando... (${code || 'Desconocido'})`);
+        setTimeout(() => global.reloadHandler(true), 1000);
       }
-      
-      reconnectAttempts++;
-      console.log(`⏳ Conexión cerrada (${code || 'Desconocido'}). Reconectando en 3s... (${reconnectAttempts}/${maxReconnectAttempts})`);
-      await new Promise(r => setTimeout(r, 3000));
-      global.reloadHandler(true);
     }
 
     if (connection === 'open') {
-      reconnectAttempts = 0;
-      console.log('✅ Bot conectado exitosamente a WhatsApp.');
-      try {
-        await global.conn.sendQueuedMessages();
-      } catch (e) {}
+      reconnecting = false;
+      console.log('✅ Conectado.');
+      try { await global.conn.sendQueuedMessages(); } catch {}
     }
   };
 
-  // Función para crear el socket limpiamente sin mutar opciones
   const createSocket = () => makeWASocket({
     version,
     logger,
     printQRInTerminal: false,
     browser: ["Ubuntu", "Chrome", "22.04"],
     markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: true,
+    generateHighQualityLinkPreview: false,
     syncFullHistory: false,
     getMessage: async () => ({ conversation: '' }),
     msgRetryCounterCache,
     userDevicesCache,
-    keepAliveIntervalMs: 55000,
-    maxIdleTimeMs: 60000,
+    keepAliveIntervalMs: 25000,
+    maxIdleTimeMs: 120000,
+    retryRequestDelayMs: 100,
+    maxMsgRetryCount: 3,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -125,24 +121,25 @@ async function startConnection() {
       
       if (restartConn) {
         const oldChats = global.conn?.chats || {};
-        try { global.conn?.ws?.close(); } catch {}
         try { global.conn?.ev?.removeAllListeners(); } catch {}
+        try { global.conn?.ws?.close(); } catch {}
         
         global.conn = createSocket();
         global.conn.ev.on('connection.update', connectionUpdate);
         global.conn.ev.on('creds.update', saveCreds);
+        global.conn.chats = oldChats;
       }
       
       handleEvents(global.conn, global.commandsMap);
       return true;
     } catch (e) {
-      console.error('❌ Error en reloadHandler:', e.message);
+      console.error('❌ reloadHandler:', e.message);
+      setTimeout(() => global.reloadHandler(true), 2000);
       return false;
     }
   };
 
   global.conn = createSocket();
-
   global.conn.ev.on('connection.update', connectionUpdate);
   global.conn.ev.on('creds.update', saveCreds);
 
