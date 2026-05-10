@@ -15,10 +15,6 @@ export default async function (msg, sock, ctx) {
     await sock.sendMessage(jid, { text: '❌ Debes escribir algo.\nEjemplo: `.pinsearch gatos`' }, { quoted: msg })
     return true
   }
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' }, { quoted: msg })
-    return true
-  }
 
   const statusMsg = await sock.sendMessage(jid, {
     text: `📌 Buscando *"${query}"* en Pinterest...`
