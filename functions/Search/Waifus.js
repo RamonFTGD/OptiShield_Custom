@@ -48,12 +48,7 @@ export default async function (msg, sock, ctx) {
   const jid    = msg.key.remoteJid
   const query  = ctx.args.join(' ').trim()
   const apikey = ctx?.info?.user?.apikey
-
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
-    return true
-  }
-
+  
   if (!query) {
     const chunkSize = 10
     const sections  = []
