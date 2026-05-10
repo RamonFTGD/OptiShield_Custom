@@ -111,7 +111,7 @@ export default async function (msg, sock, ctx) {
 
     let res
     try {
-        res = await global.OptiShield.callApi('mediafiredl', { url, apikey: ctx.apikey })
+        res = await global.OptiShield.callApi('mediafiredl', { url })
     } catch (e) {
         await updateLog(`❌ Error al contactar la API: ${e?.message || 'Error desconocido'}`)
         return true
