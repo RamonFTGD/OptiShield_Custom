@@ -16,7 +16,6 @@ export default async function (msg, sock, ctx) {
   const apikey = ctx?.info?.user?.apikey
   const reply = (text) => sock.sendMessage(jid, { text }, { quoted: msg })
 
-  if (!apikey) return reply('▸ API Key no disponible.')
   if (!query) return reply('▸ Debes escribir algo. Ejemplo: .bcsearch Carpenter Brut')
 
   const statusMsg = await reply(`Buscando "${query}" en Bandcamp...`)
