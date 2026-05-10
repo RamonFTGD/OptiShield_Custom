@@ -124,11 +124,6 @@ export default async function (msg, sock, ctx) {
   const jid    = msg.key.remoteJid
   const apikey = info?.user?.apikey
 
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   if (!args.length) {
     await sendInteractiveWithImage(sock, jid, {
       bodyText:
