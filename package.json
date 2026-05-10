@@ -18,7 +18,6 @@
     "@leifermendez/baileys": "^7.0.0-rc.6",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "axios": "^1.13.2",
-    "baileys": "file:baileys-fork",
     "cheerio": "^1.2.0",
     "express": "^5.2.1",
     "fflate": "^0.8.2",
