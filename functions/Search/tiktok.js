@@ -27,11 +27,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
-    return true
-  }
-
   const statusMsg = await sock.sendMessage(jid, {
     text: `🎵 Buscando en TikTok: *${query}*...`
   }, { quoted: msg })
