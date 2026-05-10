@@ -246,11 +246,6 @@ export default async function (msg, sock, ctx) {
   const chatId = msg.key.remoteJid
   const apikey = info?.user?.apikey
 
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   if (command === 'rd_video') {
     const url = text.trim()
     if (!url) return true
