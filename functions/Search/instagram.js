@@ -20,11 +20,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' }, { quoted: msg })
-    return true
-  }
-
   const statusMsg = await sock.sendMessage(jid, {
     text: `🔎 Buscando *"${query}"* en Instagram...`
   }, { quoted: msg })
