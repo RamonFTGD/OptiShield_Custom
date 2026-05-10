@@ -4,7 +4,7 @@ import sharp from 'sharp'
 import { exec } from 'child_process'
 import { randomUUID } from 'crypto'
 import { downloadContentFromMessage } from '@whiskeysockets/baileys'
-import { addExif } from '../lib/sticker.js'
+import { addExif } from '../../lib/sticker.js'
 
 export const meta = {
   name: 'sticker',
