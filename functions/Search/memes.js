@@ -47,12 +47,6 @@ const MEME_CATEGORIES = [
 export default async function (msg, sock, ctx) {
   const jid    = msg.key.remoteJid
   const query  = ctx.args.join(' ').trim()
-  const apikey = ctx?.info?.user?.apikey
-
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
-    return true
-  }
 
   if (!query) {
 
@@ -99,7 +93,7 @@ export default async function (msg, sock, ctx) {
     const category = MEME_CATEGORIES.find(c => c.name.toLowerCase() === query.toLowerCase())
     const searchQuery = category ? category.query : `memes ${query} graciosos español`
 
-    const res = await global.OptiShield.callApi('pinterestSearch', { query: searchQuery, apikey })
+    const res = await global.OptiShield.callApi('pinterestSearch', { query: searchQuery })
 
     if (res.error || !res?.result?.ok || !res.result.results?.length) {
       await sock.sendMessage(jid, {
