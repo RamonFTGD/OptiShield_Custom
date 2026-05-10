@@ -17,11 +17,6 @@ export default async function (msg, sock, ctx) {
         return true
     }
 
-    if (!apikey) {
-        await sock.sendMessage(chatId, { text: '❌ API key no configurada' }, { quoted: msg })
-        return true
-    }
-
     const res = await global.OptiShield.callApi('minecraft-user-search', { user: username, apikey })
     console.log(res)
 
