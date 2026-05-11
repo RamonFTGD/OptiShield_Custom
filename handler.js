@@ -3,69 +3,68 @@ import path from 'path';
 import url from 'url';
 
 const RE = {
-  INVISIBLE: /[\u200e\u200f\u202a-\u202e\u00a0]/g,
-  SPLIT: /\s+/,
+    INVISIBLE: /[\u200e\u200f\u202a-\u202e\u00a0]/g,
+    SPLIT: /\s+/,
 };
 
 function cleanText(text) {
-  return text ? text.replace(RE.INVISIBLE, ' ').trim() : '';
+    return text ? text.replace(RE.INVISIBLE, ' ').trim() : '';
 }
 
 function extractMessageContent(msg) {
-  if (!msg?.message) return '';
+    if (!msg?.message) return '';
 
-  if (msg.message?.buttonsResponseMessage?.selectedButtonId) return msg.message.buttonsResponseMessage.selectedButtonId;
-  if (msg.message?.templateButtonReplyMessage?.selectedId) return msg.message.templateButtonReplyMessage.selectedId;
-  if (msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId) return msg.message.listResponseMessage.singleSelectReply.selectedRowId;
+    if (msg.message?.buttonsResponseMessage?.selectedButtonId) return msg.message.buttonsResponseMessage.selectedButtonId;
+    if (msg.message?.templateButtonReplyMessage?.selectedId) return msg.message.templateButtonReplyMessage.selectedId;
+    if (msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId) return msg.message.listResponseMessage.singleSelectReply.selectedRowId;
 
-  const int = msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  if (int) return typeof int === 'string' ? int : JSON.stringify(int);
+    const int = msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    if (int) return typeof int === 'string' ? int : JSON.stringify(int);
 
-  let content = msg.message;
-  if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
-  else if (content.viewOnceMessage) content = content.viewOnceMessage.message;
-  else if (content.ephemeralMessage) content = content.ephemeralMessage.message;
+    let content = msg.message;
+    if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
+    else if (content.viewOnceMessage) content = content.viewOnceMessage.message;
+    else if (content.ephemeralMessage) content = content.ephemeralMessage.message;
 
-  if (content?.conversation) return content.conversation;
-  if (content?.extendedTextMessage?.text) return content.extendedTextMessage.text;
-  if (content?.imageMessage?.caption) return content.imageMessage.caption;
-  if (content?.videoMessage?.caption) return content.videoMessage.caption;
+    if (content?.conversation) return content.conversation;
+    if (content?.extendedTextMessage?.text) return content.extendedTextMessage.text;
+    if (content?.imageMessage?.caption) return content.imageMessage.caption;
+    if (content?.videoMessage?.caption) return content.videoMessage.caption;
 
-  return '';
+    return '';
 }
 
 export async function loadPlugins(dirPath) {
-  const commands = new Map();
-  if (!fs.existsSync(dirPath)) {
-    console.warn(`⚠️ Carpeta de plugins no encontrada: ${dirPath}`);
-    return commands;
-  }
-
-  const readDir = async (p) => {
-    const items = fs.readdirSync(p, { withFileTypes: true });
-    for (const item of items) {
-      const fullPath = path.join(p, item.name);
-      if (item.isDirectory()) {
-        await readDir(fullPath);
-      } else if (item.name.endsWith('.js')) {
-        try {
-
-          const mod = await import(url.pathToFileURL(fullPath).href + `?t=${Date.now()}`);
-          if (mod.meta?.commands && typeof mod.default === 'function') {
-            mod.meta.commands.forEach(c => {
-              commands.set(c.toLowerCase(), { meta: mod.meta, run: mod.default });
-            });
-            console.log(`✅ Plugin cargado: ${mod.meta.name} [${mod.meta.commands.join(', ')}]`);
-          }
-        } catch (e) {
-          console.error(`❌ Error cargando ${item.name}:`, e.message);
-        }
-      }
+    const commands = new Map();
+    if (!fs.existsSync(dirPath)) {
+        console.warn(`⚠️ Carpeta de plugins no encontrada: ${dirPath}`);
+        return commands;
     }
-  };
-  await readDir(dirPath);
-  console.log(`🚀 Total comandos cargados: ${commands.size}`);
-  return commands;
+
+    const readDir = async (p) => {
+        const items = fs.readdirSync(p, { withFileTypes: true });
+        for (const item of items) {
+            const fullPath = path.join(p, item.name);
+            if (item.isDirectory()) {
+                await readDir(fullPath);
+            } else if (item.name.endsWith('.js')) {
+                try {
+                    const mod = await import(url.pathToFileURL(fullPath).href + `?t=${Date.now()}`);
+                    if (mod.meta?.commands && typeof mod.default === 'function') {
+                        mod.meta.commands.forEach(c => {
+                            commands.set(c.toLowerCase(), { meta: mod.meta, run: mod.default });
+                        });
+                        console.log(`✅ Plugin cargado: ${mod.meta.name} [${mod.meta.commands.join(', ')}]`);
+                    }
+                } catch (e) {
+                    console.error(`❌ Error cargando ${item.name}:`, e.message);
+                }
+            }
+        }
+    };
+    await readDir(dirPath);
+    console.log(`🚀 Total comandos cargados: ${commands.size}`);
+    return commands;
 }
 
 export function handleEvents(sock, commandsMap, options = {}) {
@@ -74,7 +73,7 @@ export function handleEvents(sock, commandsMap, options = {}) {
         database = null 
     } = options;
     
-    const handler = async ({ messages, type }) => { // <- Esta es la variable handler
+    const handler = async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
         if (!msg?.message) return;
@@ -97,10 +96,14 @@ export function handleEvents(sock, commandsMap, options = {}) {
 
         const parts = body.split(RE.SPLIT);
         const commandName = parts[0]?.toLowerCase();
-        const args = parts.slice(1); 
+        
+
+        const args = parts.slice(1);
 
         const cmd = commandsMap.get(commandName);
         if (!cmd) return;
+
+        console.log(`👉 Ejecutando: ${commandName} | Args: ${args.join(' ')}`);
 
         const ctx = {
             command: commandName,
@@ -127,4 +130,38 @@ export function handleEvents(sock, commandsMap, options = {}) {
     
     sock.ev.on('messages.upsert', handler);
     return handler;
+}
+
+export function watchPlugins(dirPath, commandsMap) {
+    if (!fs.existsSync(dirPath)) {
+        console.warn('⚠️ No se puede observar plugins: carpeta no existe.');
+        return;
+    }
+
+    fs.watch(dirPath, { recursive: true }, async (eventType, filename) => {
+        if (!filename || !filename.endsWith('.js')) return;
+        
+        const fullPath = path.join(dirPath, filename);
+        
+
+        setTimeout(async () => {
+            try {
+                console.log(`🔄 Detectado cambio en: ${filename}. Recargando...`);
+                
+
+                const moduleUrl = url.pathToFileURL(fullPath).href + `?update=${Date.now()}`;
+                const mod = await import(moduleUrl);
+                
+                if (mod.meta?.commands) {
+
+                    mod.meta.commands.forEach(c => {
+                        commandsMap.set(c.toLowerCase(), { meta: mod.meta, run: mod.default });
+                    });
+                    console.log(`✅ Plugin recargado: ${mod.meta.name}`);
+                }
+            } catch (err) {
+                console.error(`❌ Error recargando ${filename}:`, err.message);
+            }
+        }, 500);
+    });
 }
