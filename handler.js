@@ -148,10 +148,18 @@ export function handleEvents(sock, commandsMap) {
 
     let commandName = '';
     let prefix = '';
-
     const prefixMatch = prefixList.find(p => text.startsWith(p));
+    let { args, text: parsedText } = await parseCommand(text)
+    if (prefixMatch) {
+        prefix = prefixMatch;
+        args = text.slice(prefix.length).trim().split(/ +/);
+        commandName = args.shift().toLowerCase();
+    } else {
+        args = text.trim().split(/ +/);
+        commandName = args.shift().toLowerCase();
+    }
     prefix = prefixMatch
-    const { args, text: parsedText } = parseCommand(text)
+    args = (await parseCommand(text)).args
     const command = commandsMap.get(commandName);
     if (!command) return;
     const ctx = {
