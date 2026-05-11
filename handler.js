@@ -62,6 +62,41 @@ export function watchPlugins(dirPath) {
   });
 }
 
+const RE = Object.freeze({
+    INVISIBLE: /[\u200e\u200f\u202a-\u202e\u00a0]/g,
+    PREFIX: /^[.!/#$]/,
+    SPACE: /\s/,
+    SPLIT: /\s+/,
+    NON_DIGITS: /\D+/g,
+    JID_SUFFIX: /@.+$/,
+    COLON_PREFIX: /:.*$/,
+})
+
+export function parseCommand(raw) {
+    if (!raw) return _emptyCmd
+
+    const clean = raw.replace(RE.INVISIBLE, ' ').trim()
+    const hasPrefix = RE.PREFIX.test(clean)
+    const wp = hasPrefix ? clean.slice(1).trimStart() : clean
+
+    const idx = wp.search(RE.SPACE)
+    let cmd, rest
+
+    if (idx === -1) {
+        cmd = wp.toLowerCase()
+        rest = ''
+    } else {
+        cmd = wp.slice(0, idx).toLowerCase()
+        rest = wp.slice(idx + 1).trim()
+    }
+
+    return {
+        command: cmd,
+        args: rest ? rest.split(RE.SPLIT) : [],
+        text: rest
+    }
+}
+
 export function handleEvents(sock, commandsMap) {
   const db = global.OptiShield?.db;
   const prefixList = ['!', '.', '#', '/'];
@@ -112,21 +147,11 @@ export function handleEvents(sock, commandsMap) {
     if (!text) return;
 
     let commandName = '';
-    let args = [];
     let prefix = '';
 
     const prefixMatch = prefixList.find(p => text.startsWith(p));
-    if (prefixMatch) {
-        prefix = prefixMatch;
-        args = text.slice(prefix.length).trim().split(/ +/);
-        commandName = args.shift().toLowerCase();
-    } else {
-        args = text.trim().split(/ +/);
-        commandName = args.shift().toLowerCase();
-    }
-
-    const command = commandsMap.get(commandName);
-    if (!command) return;
+    prefix = prefixMatch
+    const { command, args, text: parsedText } = parseCommand(text)
 
     const ctx = {
       chatId,
@@ -134,7 +159,10 @@ export function handleEvents(sock, commandsMap) {
       args,
       prefix,
       sender: msg.key.participant || chatId,
-      db
+      db,
+      text,
+      parsedText,
+      command
     };
 
     try {
