@@ -18,7 +18,6 @@ const userDevicesCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
 
 const STORE_FILE = './session/store.json';
 
-// Store manual (makeInMemoryStore fue eliminado de baileys)
 const store = {
   chats: {},
   messages: {},
@@ -204,7 +203,13 @@ async function startConnection() {
 
   global.reloadHandler = async (restartConn) => {
     try {
-      const { handleEvents } = await import(`./handler.js?update=${Date.now()}`);
+      const { handleEvents, loadPlugins } = await import(`./handler.js?update=${Date.now()}`);
+      
+      // Asegurar que los plugins estén cargados (Fix para respuesta nula)
+      if (!global.commandsMap) {
+        console.log('📦 Cargando plugins iniciales...');
+        global.commandsMap = await loadPlugins('./plugins');
+      }
       
       if (restartConn) {
         const oldChats = global.conn?.chats || {};
@@ -218,6 +223,10 @@ async function startConnection() {
       }
       
       global.store = store;
+      
+      // Limpiar listeners antiguos de mensajes antes de volver a adjuntar para evitar duplicados
+      global.conn.ev.off('messages.upsert', global.conn.handler);
+      
       handleEvents(global.conn, global.commandsMap);
       return true;
     } catch (e) {
@@ -230,6 +239,11 @@ async function startConnection() {
   global.conn = createSocket();
   global.conn.ev.on('connection.update', connectionUpdate);
   global.conn.ev.on('creds.update', saveCreds);
+
+  // CORRECCIÓN CRÍTICA: Forzar la carga inicial del handler
+  setTimeout(() => {
+    global.reloadHandler(false).catch(e => console.error('Error inicial:', e));
+  }, 2000);
 
   if (!state.creds.registered) {
     await askPairingCode();
