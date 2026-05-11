@@ -223,7 +223,7 @@ async function handleMain(msg, sock, ctx) {
   const { args, info } = ctx
   const jid = msg.key.remoteJid
   const apikey = info?.user?.apikey
-  const url = args.join(' ').trim()
+  const url = info.split(" ")[1].trim()
 
   if (!url || !isUrl(url)) {
     await sock.sendMessage(jid, {
@@ -234,6 +234,11 @@ async function handleMain(msg, sock, ctx) {
 
   if (!isTikTokUrl(url)) {
     await sock.sendMessage(jid, { text: `❌ El link no es de TikTok\n\n*Dominios validos:*\n• tiktok.com\n• vm.tiktok.com\n• vt.tiktok.com` }, { quoted: msg })
+    return true
+  }
+
+  if (!apikey) {
+    await sock.sendMessage(jid, { text: `⚠️ Sin APIKEY — contacta al administrador` }, { quoted: msg })
     return true
   }
 
