@@ -223,7 +223,7 @@ async function handleMain(msg, sock, ctx) {
   const { args, info } = ctx
   const jid = msg.key.remoteJid
   const apikey = info?.user?.apikey
-  const url = info.split(" ")[1].trim()
+  const url = args.join(' ').trim()
 
   if (!url || !isUrl(url)) {
     await sock.sendMessage(jid, {
