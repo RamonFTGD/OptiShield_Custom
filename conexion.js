@@ -205,7 +205,6 @@ async function startConnection() {
     try {
       const { handleEvents, loadPlugins } = await import(`./handler.js?update=${Date.now()}`);
       
-      // Asegurar que los plugins estén cargados (Fix para respuesta nula)
       if (!global.commandsMap) {
         console.log('📦 Cargando plugins iniciales...');
         global.commandsMap = await loadPlugins('./plugins');
@@ -213,7 +212,8 @@ async function startConnection() {
       
       if (restartConn) {
         const oldChats = global.conn?.chats || {};
-        try { global.conn?.ev?.removeAllListeners(); } catch {}
+        try { global.conn?.ev?.removeAllListeners('messages.upsert'); } catch {}
+        try { global.conn?.ev?.removeAllListeners('connection.update'); } catch {}
         try { global.conn?.ws?.close(); } catch {}
         
         global.conn = createSocket();
@@ -223,11 +223,12 @@ async function startConnection() {
       }
       
       global.store = store;
-      
-      // Limpiar listeners antiguos de mensajes antes de volver a adjuntar para evitar duplicados
-      global.conn.ev.off('messages.upsert', global.conn.handler);
-      
+
+      // SOLUCIÓN: Limpiar listeners de mensajes y volver a adjuntar
+      global.conn.ev.removeAllListeners('messages.upsert');
+      store.bind(global.conn.ev);
       handleEvents(global.conn, global.commandsMap);
+      
       return true;
     } catch (e) {
       console.error('❌ reloadHandler:', e.message);
@@ -240,7 +241,6 @@ async function startConnection() {
   global.conn.ev.on('connection.update', connectionUpdate);
   global.conn.ev.on('creds.update', saveCreds);
 
-  // CORRECCIÓN CRÍTICA: Forzar la carga inicial del handler
   setTimeout(() => {
     global.reloadHandler(false).catch(e => console.error('Error inicial:', e));
   }, 2000);
