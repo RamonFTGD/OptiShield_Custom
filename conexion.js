@@ -211,8 +211,12 @@ async function startConnection() {
       }
       
       if (restartConn) {
+        // Eliminar listener viejo si existe antes de destruir el socket
+        if (typeof global.conn.handler === 'function') {
+            try { global.conn.ev.off('messages.upsert', global.conn.handler); } catch {}
+        }
+
         const oldChats = global.conn?.chats || {};
-        try { global.conn?.ev?.removeAllListeners('messages.upsert'); } catch {}
         try { global.conn?.ev?.removeAllListeners('connection.update'); } catch {}
         try { global.conn?.ws?.close(); } catch {}
         
@@ -220,14 +224,23 @@ async function startConnection() {
         global.conn.ev.on('connection.update', connectionUpdate);
         global.conn.ev.on('creds.update', saveCreds);
         global.conn.chats = oldChats;
+        
+        // Resetear la referencia del handler al crear nuevo socket
+        global.conn.handler = null;
       }
       
       global.store = store;
 
-      // SOLUCIÓN: Limpiar listeners de mensajes y volver a adjuntar
-      global.conn.ev.removeAllListeners('messages.upsert');
-      store.bind(global.conn.ev);
-      handleEvents(global.conn, global.commandsMap);
+      // Eliminar SOLAMENTE el listener de comandos antiguo si existe
+      if (typeof global.conn.handler === 'function') {
+          try { 
+              console.log('🔄 Limpiando listener de mensajes anterior...');
+              global.conn.ev.off('messages.upsert', global.conn.handler); 
+          } catch (e) { console.error('Error limpiando listener:', e.message); }
+      }
+
+      // Guardamos la referencia del nuevo handler
+      global.conn.handler = handleEvents(global.conn, global.commandsMap);
       
       return true;
     } catch (e) {
@@ -238,9 +251,11 @@ async function startConnection() {
   };
 
   global.conn = createSocket();
+  global.conn.handler = null; // Inicializar en null
   global.conn.ev.on('connection.update', connectionUpdate);
   global.conn.ev.on('creds.update', saveCreds);
 
+  // Cargar handler al inicio
   setTimeout(() => {
     global.reloadHandler(false).catch(e => console.error('Error inicial:', e));
   }, 2000);
