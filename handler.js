@@ -151,8 +151,9 @@ export function handleEvents(sock, commandsMap) {
 
     const prefixMatch = prefixList.find(p => text.startsWith(p));
     prefix = prefixMatch
-    const { command, args, text: parsedText } = parseCommand(text)
-
+    const { args, text: parsedText } = parseCommand(text)
+    const command = commandsMap.get(commandName);
+    if (!command) return;
     const ctx = {
       chatId,
       isGroup,
@@ -161,8 +162,7 @@ export function handleEvents(sock, commandsMap) {
       sender: msg.key.participant || chatId,
       db,
       text,
-      parsedText,
-      command
+      parsedText
     };
 
     try {
