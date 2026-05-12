@@ -23,9 +23,7 @@ function formatCooldown(ms) {
 }
 
 function formatSize(cm) {
-
     if (isNaN(cm) || cm === null || cm === undefined) cm = BASE_SIZE_CM
-    
     const abs = Math.abs(cm)
     if (abs === 0) return '0 cm (literalmente invisible 🔬)'
     if (cm < 0) return `${Math.abs(cm)} cm (está al revés wey 🙃)`
@@ -52,51 +50,68 @@ function medal(i) {
     return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
 }
 
-function getPushName(msg, fallbackJid) {
-    if (msg?.key?.pushName) return msg.key.pushName
+// Función Avanzada de Obtención de Nombres
+// Retorna { text: "Nombre o JID", isNumber: boolean }
+async function getName(sock, jid, msg, currentDbName = null) {
+    let name = null
 
-    const mentioned = msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0]
-    if (mentioned && mentioned === fallbackJid) {
-
+    // 1. Si es el remitente, usamos el pushName del mensaje
+    if (msg && (msg.key.participant === jid || msg.key.remoteJid === jid)) {
+        if (msg.key.pushName) name = msg.key.pushName
     }
-    return fallbackJid ? fallbackJid.split('@')[0] : 'Desconocido'
+
+    // 2. Si no hay nombre, buscar en la agenda de Baileys (store.contacts)
+    if (!name && sock?.store?.contacts && sock.store.contacts[jid]) {
+        const c = sock.store.contacts[jid]
+        name = c.name || c.notify || c.verifiedName
+    }
+
+    // 3. Si aún no hay nombre, usar el que ya está en la DB (si se pasó)
+    if (!name && currentDbName) name = currentDbName
+
+    // 4. Último recurso: El número, pero intentaremos ocultarlo si es posible
+    if (!name) name = jid.split('@')[0]
+
+    // Detección: ¿Es un número puro?
+    const isNumber = /^\d+$/.test(name)
+
+    return { text: name, isNumber }
 }
 
 async function getUserStats(db, phone) {
-    const key = `pajas_${phone}`
-    const res = await db.get(key)
-    
+    const res = await db.get(phone)
+    let userData = (res && res.data) || {}
 
-    let data = {
-        name: '',
-        sizeCm: BASE_SIZE_CM,
-        lastPaja: 0,
-        sesiones: 0,
-        mayorAlza: 0,
-        mayorBaja: 0,
-        duelos: { ganados: 0, perdidos: 0 }
-    }
-
-    if (res && res.data) {
-
-        const saved = res.data
-        data = {
-            name: saved.name || '',
-            sizeCm: isNaN(saved.sizeCm) ? BASE_SIZE_CM : saved.sizeCm,
-            lastPaja: Number(saved.lastPaja) || 0,
-            sesiones: Number(saved.sesiones) || 0,
-            mayorAlza: Number(saved.mayorAlza) || 0,
-            mayorBaja: Number(saved.mayorBaja) || 0,
-            duelos: {
-                ganados: Number(saved.duelos?.ganados) || 0,
-                perdidos: Number(saved.duelos?.perdidos) || 0
-            }
+    if (!userData.pajas) {
+        userData.pajas = {
+            name: '',
+            sizeCm: BASE_SIZE_CM,
+            lastPaja: 0,
+            sesiones: 0,
+            mayorAlza: 0,
+            mayorBaja: 0,
+            duelos: { ganados: 0, perdidos: 0 }
         }
-    } else {
-
-        await db.set(key, data)
     }
-    return data
+
+    const p = userData.pajas
+    p.sizeCm = isNaN(p.sizeCm) ? BASE_SIZE_CM : Number(p.sizeCm)
+    p.lastPaja = Number(p.lastPaja) || 0
+    p.sesiones = Number(p.sesiones) || 0
+    p.mayorAlza = Number(p.mayorAlza) || 0
+    p.mayorBaja = Number(p.mayorBaja) || 0
+    p.duelos.ganados = Number(p.duelos?.ganados) || 0
+    p.duelos.perdidos = Number(p.duelos?.perdidos) || 0
+
+    await db.set(phone, userData)
+    return userData.pajas
+}
+
+async function saveUserStats(db, phone, pajaData) {
+    const res = await db.get(phone)
+    let userData = (res && res.data) || {}
+    userData.pajas = pajaData
+    await db.set(phone, userData)
 }
 
 async function updateLeaderboard(db, phone, name, sizeCm) {
@@ -105,17 +120,26 @@ async function updateLeaderboard(db, phone, name, sizeCm) {
     let list = (res && res.data && res.data.list) ? res.data.list : []
 
     const existingIndex = list.findIndex(u => u.phone === phone)
-
     const userData = { phone, name: name || phone.split('@')[0], sizeCm, updated: Date.now() }
 
     if (existingIndex !== -1) {
-        list[existingIndex] = userData
+        // Si ya existe, actualizamos SI el nuevo nombre es mejor (no es solo números)
+        // o si el viejo también era solo números
+        const oldEntry = list[existingIndex]
+        const isOldNumber = /^\d+$/.test(oldEntry.name)
+        
+        if (!userData.isNumber || isOldNumber) {
+             list[existingIndex] = userData
+        } else {
+             // Si el viejo nombre era bonito y el nuevo es un número, conservamos el viejo nombre
+             userData.name = oldEntry.name
+             list[existingIndex] = userData
+        }
     } else {
         list.push(userData)
     }
 
     list.sort((a, b) => b.sizeCm - a.sizeCm)
-    
     await db.set(lbKey, { list: list.slice(0, 50) })
 }
 
@@ -141,17 +165,22 @@ export default async function (msg, sock, ctx) {
     const command = args[0].toLowerCase().replace(/^[.!/#$]/, '')
     const now = Date.now()
 
-    const currentPushName = getPushName(msg, phone)
-
     if (command === 'paja') {
-        const stat = await getUserStats(db, phone)
+        const pajaData = await getUserStats(db, phone)
         
-
-        if (!stat.name || stat.name !== currentPushName) {
-            stat.name = currentPushName
+        // Obtener nombre actual
+        const nameInfo = await getName(sock, phone, msg, pajaData.name)
+        
+        // Solo actualizar el nombre en la DB si NO es un número
+        // (Si es un número, nos quedamos con el nombre que ya teníamos o dejamos vacío para que use el del store)
+        if (!nameInfo.isNumber) {
+            pajaData.name = nameInfo.text
+        } else if (!pajaData.name) {
+            // Si no tenía nombre guardado y es un número, no lo guardamos como nombre fijo
+            // Pero para mostrarlo usaremos nameInfo.text temporalmente
         }
 
-        const cd = COOLDOWN_MS - (now - stat.lastPaja)
+        const cd = COOLDOWN_MS - (now - pajaData.lastPaja)
 
         if (cd > 0) {
             await sock.sendMessage(chatId, {
@@ -163,32 +192,34 @@ export default async function (msg, sock, ctx) {
         }
 
         const delta = rnd(MIN_DELTA, MAX_DELTA)
-
-        let anterior = Number(stat.sizeCm) || BASE_SIZE_CM
+        let anterior = Number(pajaData.sizeCm) || BASE_SIZE_CM
         if (isNaN(anterior)) anterior = BASE_SIZE_CM
         
         let nuevoSize = anterior + delta
         if (isNaN(nuevoSize)) nuevoSize = BASE_SIZE_CM
 
-        stat.sizeCm = nuevoSize
-        stat.lastPaja = now
-        stat.sesiones++
-        if (delta > stat.mayorAlza) stat.mayorAlza = delta
-        if (delta < stat.mayorBaja) stat.mayorBaja = delta
+        pajaData.sizeCm = nuevoSize
+        pajaData.lastPaja = now
+        pajaData.sesiones++
+        if (delta > pajaData.mayorAlza) pajaData.mayorAlza = delta
+        if (delta < pajaData.mayorBaja) pajaData.mayorBaja = delta
 
-        await db.set(`pajas_${phone}`, stat)
-        await updateLeaderboard(db, phone, stat.name, stat.sizeCm)
+        await saveUserStats(db, phone, pajaData)
+        await updateLeaderboard(db, phone, pajaData.name, pajaData.sizeCm)
 
         const signo = delta >= 0 ? `+${delta}` : `${delta}`
         const comentario = comentarioDelta(delta)
+
+        // Usamos el nombre para mostrar (priorizando el guardado o el actual)
+        const displayName = pajaData.name || nameInfo.text
 
         let textMsg = `🍆 *RESULTADO DE LA SESIÓN*\n`
         textMsg += `━━━━━━━━━━━━━━━━━━━━\n\n`
         textMsg += `📏 Antes:  *${formatSize(anterior)}*\n`
         textMsg += `📐 Cambio: *${signo} cm*\n`
-        textMsg += `📏 Ahora:  *${formatSize(stat.sizeCm)}*\n\n`
+        textMsg += `📏 Ahora:  *${formatSize(pajaData.sizeCm)}*\n\n`
         textMsg += `${comentario}\n\n`
-        textMsg += `🗓️ Sesión #${stat.sesiones} · ⏰ Próxima en *23h*`
+        textMsg += `🗓️ Sesión #${pajaData.sesiones} · ⏰ Próxima en *23h*`
 
         await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
@@ -211,21 +242,37 @@ export default async function (msg, sock, ctx) {
 
         const top = list.slice(0, 10)
 
-        top.forEach((e, i) => {
-            const displayName = e.name || e.phone.split('@')[0]
-            textMsg += `${medal(i)} *${displayName}*\n`
+        for (const e of top) {
+            let displayName = e.name
+            
+            // Si el nombre guardado está vacío o es un número, intentar buscar en la tienda de contacts
+            if (!displayName || /^\d+$/.test(displayName)) {
+                const contactInfo = await getName(sock, e.phone, msg, null)
+                displayName = contactInfo.text
+                // Si sigue siendo número y es largo, mostrar "Desconocido" o acortarlo
+                if (contactInfo.isNumber && displayName.length > 8) {
+                    displayName = "👤 Desconocido"
+                }
+            }
+            
+            textMsg += `${medal(top.indexOf(e))} *${displayName}*\n`
             textMsg += `   📏 ${formatSize(e.sizeCm)}\n\n`
-        })
+        }
 
         const losers = [...list].sort((a, b) => a.sizeCm - b.sizeCm).slice(0, 3)
 
         textMsg += `━━━━━━━━━━━━━━━━━━━━\n`
         textMsg += `🪦 *El podio de los penudos:*\n`
-        losers.forEach((e, i) => {
+        for (const e of losers) {
+            const i = losers.indexOf(e)
             const suffix = i === 0 ? ' 👑 *(Rey penudo)*' : ''
-            const displayName = e.name || e.phone.split('@')[0]
+            let displayName = e.name
+             if (!displayName || /^\d+$/.test(displayName)) {
+                const contactInfo = await getName(sock, e.phone, msg, null)
+                displayName = contactInfo.isNumber && displayName.length > 8 ? "👤 Desconocido" : contactInfo.text
+            }
             textMsg += `  ${i + 1}. ${displayName} — ${formatSize(e.sizeCm)}${suffix}\n`
-        })
+        }
 
         await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
@@ -250,31 +297,33 @@ export default async function (msg, sock, ctx) {
             return true
         }
 
-        const statA = await getUserStats(db, phone)
-        const statB = await getUserStats(db, mentioned)
+        const pajaDataA = await getUserStats(db, phone)
+        const pajaDataB = await getUserStats(db, mentioned)
 
-        if (!statA.name || statA.name !== currentPushName) {
-            statA.name = currentPushName
-        }
-
-        let nameB = statB.name
+        // Obtener nombre A
+        const infoA = await getName(sock, phone, msg, pajaDataA.name)
+        if (!infoA.isNumber) pajaDataA.name = infoA.text
         
+        const nameA = pajaDataA.name || infoA.text
 
-        if (!nameB) {
-
-            const ctxInfo = msg.message?.extendedTextMessage?.contextInfo
-            nameB = ctxInfo?.participantName || mentioned.split('@')[0]
+        // Obtener nombre B (Rival)
+        let nameB = pajaDataB.name
+        // Si no tiene nombre guardado, intentamos buscarlo ahora
+        if (!nameB || /^\d+$/.test(nameB)) {
+            const infoB = await getName(sock, mentioned, msg, null)
+            // Si lo encontrado es un número, preferimos "Desconocido" para que se vea mejor
+            if (!infoB.isNumber) {
+                nameB = infoB.text
+                // Actualizar su DB con este nombre
+                pajaDataB.name = nameB
+                await saveUserStats(db, mentioned, pajaDataB)
+            } else {
+                nameB = "👤 Desconocido"
+            }
         }
-        
 
-        if (nameB && nameB !== statB.name) {
-            statB.name = nameB
-        }
-
-        const nameA = statA.name
-
-        const sizeA = Number(statA.sizeCm) || BASE_SIZE_CM
-        const sizeB = Number(statB.sizeCm) || BASE_SIZE_CM
+        const sizeA = Number(pajaDataA.sizeCm) || BASE_SIZE_CM
+        const sizeB = Number(pajaDataB.sizeCm) || BASE_SIZE_CM
 
         const frames = [
             `⚔️ *DUELO DE PIJAS INICIADO*\n━━━━━━━━━━━━━━━━━━━━\n\n🅰️ ${nameA}: *${formatSize(sizeA)}*\n🅱️ ${nameB}: *${formatSize(sizeB)}*\n\n🥁 _Preparando espadas..._`,
@@ -300,15 +349,15 @@ export default async function (msg, sock, ctx) {
             return true
         }
 
-        statA.duelos.ganados++
-        statB.duelos.perdidos++
+        pajaDataA.duelos.ganados++
+        pajaDataB.duelos.perdidos++
 
-        await db.set(`pajas_${phone}`, statA)
-        await db.set(`pajas_${mentioned}`, statB)
+        // Guardar cambios de nombres actualizados
+        await saveUserStats(db, phone, pajaDataA)
+        await saveUserStats(db, mentioned, pajaDataB)
         
-
-        await updateLeaderboard(db, phone, nameA, statA.sizeCm)
-        await updateLeaderboard(db, mentioned, nameB, statB.sizeCm)
+        await updateLeaderboard(db, phone, nameA, pajaDataA.sizeCm)
+        await updateLeaderboard(db, mentioned, nameB, pajaDataB.sizeCm)
 
         const diferencia = Math.abs(sizeG - sizeP)
         const frases = [
@@ -327,7 +376,7 @@ export default async function (msg, sock, ctx) {
         textMsg += `🏆 *¡GANADOR: ${tagG}!*\n`
         textMsg += `📏 Ganó por *${diferencia} cm* de diferencia\n\n`
         textMsg += `💬 _${frase}_\n\n`
-        textMsg += `📊 Duelos de ${tagG}: ✅ ${statA.duelos.ganados}G / ❌ ${statA.duelos.perdidos}P`
+        textMsg += `📊 Duelos de ${tagG}: ✅ ${pajaDataA.duelos.ganados}G / ❌ ${pajaDataA.duelos.perdidos}P`
 
         await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
