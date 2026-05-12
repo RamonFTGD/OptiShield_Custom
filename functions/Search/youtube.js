@@ -10,7 +10,7 @@ export const meta = {
 }
 
 function getBaileysFns(sock) {
-  const candidates = ['@whiskeysockets/baileys'] //aqui agrega tus baileys si tienes mas
+  const candidates = ['@whiskeysockets/baileys', 'baileys']
   for (const pkg of candidates) {
     try {
       const mod = require(pkg)
@@ -81,18 +81,13 @@ async function sendInteractiveWithImage(sock, jid, { imageUrl, bodyText, footerT
 }
 
 export default async function (msg, sock, ctx) {
-  const { chatId, args, apikey } = ctx
+  const { chatId, args } = ctx
   const query = args.join(' ').trim()
 
   if (!query) {
     await sock.sendMessage(chatId, {
       text: '❌ Escribe algo para buscar.\nEjemplo: `.yts Ghost Mary On A Cross`'
     }, { quoted: msg })
-    return true
-  }
-
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '❌ No tienes API Key válida.' }, { quoted: msg })
     return true
   }
 
@@ -105,7 +100,7 @@ export default async function (msg, sock, ctx) {
   }
 
   try {
-    const res = await global.OptiShield.callApi('youtubeSearch', { q: query, apikey })
+    const res = await global.OptiShield.callApi('youtubeSearch', { q: query })
 
     if (res.error || !res?.result?.results?.length) {
       await edit('❌ No se encontraron resultados.')
