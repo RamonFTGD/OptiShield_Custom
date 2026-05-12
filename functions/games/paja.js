@@ -50,36 +50,29 @@ function medal(i) {
     return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
 }
 
-// Función mejorada para obtener nombres
-// isSender: true si es el que envió el mensaje (podemos usar msg.pushName)
-async function getName(sock, jid, msg = null, isSender = false) {
-    let name = null
-
-    // 1. Si es el remitente, intentamos usar el pushName del mensaje (la forma más fiable en Baileys)
+// Función segura para obtener nombres (Sin usar store.contacts que causa error)
+function getSafeName(msg, jid, isSender = false) {
+    // Si es el remitente, intentamos sacar el nombre del mensaje
     if (isSender && msg) {
-        // msg.pushName suele estar en el root del objeto mensaje
-        if (msg.pushName) name = msg.pushName
+        // Prioridad: pushName (nombre visible en whatsapp)
+        if (msg.pushName) return msg.pushName
+        // Fallback: participant name en grupos a veces viene en contextInfo, pero pushName es mejor
     }
-
-    // 2. Si no hay nombre, buscar en la agenda de Baileys (store.contacts)
-    if (!name && sock?.store?.contacts && sock.store.contacts[jid]) {
-        const c = sock.store.contacts[jid]
-        name = c.name || c.notify || c.verifiedName
-    }
-
-    // 3. Último recurso: El número
-    if (!name) name = jid.split('@')[0]
-
-    return name
+    
+    // Si no encontramos nada, devolvemos null para que el comando decida qué hacer
+    return null
 }
 
 async function getUserStats(db, phone) {
+    // SOLO LECTURA. No guardamos aquí para no borrar otros datos del usuario accidentalmente.
     const res = await db.get(phone)
-    let userData = (res && res.data) || {}
+    // Si res es null o no tiene data, empezamos objeto vacío
+    let userData = (res && res.data) ? res.data : {}
 
+    // Si no tiene la sección 'pajas', la inicializamos en memoria (aún no en DB)
     if (!userData.pajas) {
         userData.pajas = {
-            name: '', // Guardamos el nombre aquí para evitar usar números en el top
+            name: '',
             sizeCm: BASE_SIZE_CM,
             lastPaja: 0,
             sesiones: 0,
@@ -90,6 +83,7 @@ async function getUserStats(db, phone) {
     }
 
     const p = userData.pajas
+    // Validación de tipos por seguridad
     p.sizeCm = isNaN(p.sizeCm) ? BASE_SIZE_CM : Number(p.sizeCm)
     p.lastPaja = Number(p.lastPaja) || 0
     p.sesiones = Number(p.sesiones) || 0
@@ -98,15 +92,19 @@ async function getUserStats(db, phone) {
     p.duelos.ganados = Number(p.duelos?.ganados) || 0
     p.duelos.perdidos = Number(p.duelos?.perdidos) || 0
 
-    await db.set(phone, userData)
     return userData.pajas
 }
 
 async function saveUserStats(db, phone, pajaData) {
+    // 1. Obtenemos los datos actuales del usuario para no borrar su info (monedas, inventario, etc)
     const res = await db.get(phone)
-    let userData = (res && res.data) || {}
-    userData.pajas = pajaData
-    await db.set(phone, userData)
+    const existingData = (res && res.data) ? res.data : {}
+
+    // 2. Actualizamos solo la parte de 'pajas'
+    existingData.pajas = pajaData
+
+    // 3. Guardamos el objeto completo
+    await db.set(phone, existingData)
 }
 
 async function updateLeaderboard(db, phone, name, sizeCm) {
@@ -116,8 +114,6 @@ async function updateLeaderboard(db, phone, name, sizeCm) {
 
     const existingIndex = list.findIndex(u => u.phone === phone)
     
-    // Si no tenemos nombre (es número), tratamos de no actualizarlo a uno peor si ya había uno guardado, 
-    // pero por defecto usamos el que llega.
     const userData = { phone, name: name || phone.split('@')[0], sizeCm, updated: Date.now() }
 
     if (existingIndex !== -1) {
@@ -125,7 +121,7 @@ async function updateLeaderboard(db, phone, name, sizeCm) {
         const isOldNumber = /^\d+$/.test(oldEntry.name)
         const isNewNumber = /^\d+$/.test(userData.name)
 
-        // Si el viejo era nombre y el nuevo es número, conservamos el viejo
+        // Lógica para conservar nombres bonitos y no sobrescribirlos con números
         if (!isOldNumber && isNewNumber) {
             userData.name = oldEntry.name
         }
@@ -161,13 +157,14 @@ export default async function (msg, sock, ctx) {
     const now = Date.now()
 
     if (command === 'paja') {
-        const pajaData = await getUserStats(db, phone)
+        // 1. Obtener stats (Lectura)
+        let pajaData = await getUserStats(db, phone)
         
-        // Obtener nombre del remitente
-        const currentName = await getName(sock, phone, msg, true)
+        // 2. Obtener nombre actual
+        const currentName = getSafeName(msg, phone, true)
         
-        // Si no es número, guardamos el nombre en su perfil para el Top
-        if (!/^\d+$/.test(currentName)) {
+        // Si tenemos nombre y no es número, lo actualizamos en el objeto pajaData
+        if (currentName && !/^\d+$/.test(currentName)) {
             pajaData.name = currentName
         }
 
@@ -195,14 +192,13 @@ export default async function (msg, sock, ctx) {
         if (delta > pajaData.mayorAlza) pajaData.mayorAlza = delta
         if (delta < pajaData.mayorBaja) pajaData.mayorBaja = delta
 
+        // 3. Guardar stats (Escritura)
         await saveUserStats(db, phone, pajaData)
         await updateLeaderboard(db, phone, pajaData.name, pajaData.sizeCm)
 
         const signo = delta >= 0 ? `+${delta}` : `${delta}`
         const comentario = comentarioDelta(delta)
-
-        // Usamos el nombre para mostrar
-        const displayName = pajaData.name || currentName
+        const displayName = pajaData.name || currentName || phone.split('@')[0]
 
         let textMsg = `🍆 *RESULTADO DE LA SESIÓN*\n`
         textMsg += `━━━━━━━━━━━━━━━━━━━━\n\n`
@@ -236,8 +232,7 @@ export default async function (msg, sock, ctx) {
         for (const e of top) {
             let displayName = e.name
             
-            // --- SOLUCIÓN AL ERROR "DESCONOCIDO" ---
-            // 1. Si el nombre del leaderboard está vacío o es un número, intentamos buscar en su DB personal.
+            // Si el nombre es vacío o puro número, intentar buscar el nombre guardado en su DB personal
             if (!displayName || /^\d+$/.test(displayName)) {
                 try {
                     const userStats = await getUserStats(db, e.phone)
@@ -245,22 +240,15 @@ export default async function (msg, sock, ctx) {
                         displayName = userStats.name
                     }
                 } catch (err) {
-                    console.log("Error fetching user stats for name:", err)
+                    console.log("Error al buscar nombre en DB:", err)
                 }
             }
 
-            // 2. Si sigue siendo número o vacío, buscar en la agenda de contactos del bot.
-            if (!displayName || /^\d+$/.test(displayName)) {
-                const contact = sock.store.contacts[e.phone]
-                if (contact) {
-                    displayName = contact.name || contact.notify
-                }
-            }
-
-            // 3. Si falla todo, mostrar "Desconocido" o el número corto
+            // Si sigue siendo número o vacío, formatear el número para que se vea bien (sin usar contacts)
             if (!displayName || /^\d+$/.test(displayName)) {
                 const shortNum = e.phone.split('@')[0]
-                displayName = shortNum.length > 8 ? "👤 Desconocido" : shortNum
+                // Si el número es largo (más de 8 digitos), mostrar últimos 4
+                displayName = shortNum.length > 8 ? `...${shortNum.slice(-4)}` : shortNum
             }
 
             textMsg += `${medal(top.indexOf(e))} *${displayName}*\n`
@@ -276,20 +264,18 @@ export default async function (msg, sock, ctx) {
             const suffix = i === 0 ? ' 👑 *(Rey penudo)*' : ''
             let displayName = e.name
             
-            // Aplicamos la misma lógica de nombres para los perdedores
+            // Repetir lógica de nombres para perdedores
             if (!displayName || /^\d+$/.test(displayName)) {
                 try {
                     const userStats = await getUserStats(db, e.phone)
                     if (userStats.name && !/^\d+$/.test(userStats.name)) {
                         displayName = userStats.name
-                    } else if (sock.store.contacts[e.phone]) {
-                        displayName = sock.store.contacts[e.phone].name || sock.store.contacts[e.phone].notify
                     }
                 } catch (err) {}
             }
              if (!displayName || /^\d+$/.test(displayName)) {
                 const shortNum = e.phone.split('@')[0]
-                displayName = shortNum.length > 8 ? "👤 Desconocido" : shortNum
+                displayName = shortNum.length > 8 ? `...${shortNum.slice(-4)}` : shortNum
             }
 
             textMsg += `  ${i + 1}. ${displayName} — ${formatSize(e.sizeCm)}${suffix}\n`
@@ -321,27 +307,23 @@ export default async function (msg, sock, ctx) {
         const pajaDataA = await getUserStats(db, phone)
         const pajaDataB = await getUserStats(db, mentioned)
 
-        // Obtener nombre A
-        const nameA_raw = await getName(sock, phone, msg, true)
-        if (!/^\d+$/.test(nameA_raw)) pajaDataA.name = nameA_raw
-        const nameA = pajaDataA.name || nameA_raw
+        // NOMBRE A
+        const nameA_raw = getSafeName(msg, phone, true)
+        if (nameA_raw && !/^\d+$/.test(nameA_raw)) pajaDataA.name = nameA_raw
+        const nameA = pajaDataA.name || nameA_raw || phone.split('@')[0]
 
-        // Obtener nombre B (Rival) - Aplicamos misma lógica que en ptop
+        // NOMBRE B
         let nameB = pajaDataB.name
+        
+        // Si B no tiene nombre bonito guardado, y no podemos buscar en contacts (error), usamos su ID
         if (!nameB || /^\d+$/.test(nameB)) {
-            // Buscar en contacts si no tenemos nombre bonito
-            const contactB = sock.store.contacts[mentioned]
-            const contactNameB = contactB ? (contactB.name || contactB.notify) : null
+            // Truco extra: Si B es el mencionado, a veces el mensaje trae su nombre en la string, pero es unreliable.
+            // Lo mejor es usar su ID formateado o pedirle que use el comando paja para registrarse.
+            const shortNumB = mentioned.split('@')[0]
+            nameB = shortNumB.length > 8 ? `...${shortNumB.slice(-4)}` : shortNumB
             
-            if (contactNameB && !/^\d+$/.test(contactNameB)) {
-                nameB = contactNameB
-                // Guardamos el nombre descubierto en su DB para el futuro
-                pajaDataB.name = nameB
-                await saveUserStats(db, mentioned, pajaDataB)
-            } else {
-                // Si no hay nada, usar el nombre descubierto o desconocido
-                nameB = contactNameB || "👤 Rival"
-            }
+            // Opcional: Guardar este nombre "feo" para que no sea null en la proxima
+            if (!pajaDataB.name) pajaDataB.name = nameB
         }
 
         const sizeA = Number(pajaDataA.sizeCm) || BASE_SIZE_CM
@@ -372,6 +354,7 @@ export default async function (msg, sock, ctx) {
         statsG.duelos.ganados++
         statsP.duelos.perdidos++
 
+        // Guardar datos de ambos participantes
         await saveUserStats(db, phone, pajaDataA)
         await saveUserStats(db, mentioned, pajaDataB)
         
@@ -395,7 +378,6 @@ export default async function (msg, sock, ctx) {
         textMsg += `🏆 *¡GANADOR: ${tagG}!*\n`
         textMsg += `📏 Ganó por *${diferencia} cm* de diferencia\n\n`
         textMsg += `💬 _${frase}_\n\n`
-        // Corrección pequeña: statsG puede ser A o B dependiendo quien ganó
         textMsg += `📊 Duelos de ${tagG}: ✅ ${statsG.duelos.ganados}G / ❌ ${statsG.duelos.perdidos}P`
 
         await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
