@@ -79,7 +79,7 @@ function buildInteractive(videoUrl, audioUrl, originalUrl) {
   ]
 }
 
-// --- FUNCIONES NATIVAS DE BAILEYS (Sin gifted-btns) ---
+// --- FUNCIONES NATIVAS DE BAILEYS ---
 function getBaileysFns(sock) {
   const candidates = ['baileys', '@whiskeysockets/baileys', '@adiwajshing/baileys']
   for (const pkg of candidates) {
@@ -144,7 +144,8 @@ async function sendInteractiveWithImage(sock, jid, { imageUrl, bodyText, footerT
 
 async function handleVideo(msg, sock, ctx) {
   const jid = msg.key.remoteJid
-  const url = ctx.args[1]
+  // CORRECCIÓN: ctx.args[0] es la URL, ctx.args[1] sería undefined
+  const url = ctx.args[0] 
   if (!url) return true
 
   const { key: logKey } = await sock.sendMessage(jid, { text: `🎬 *Preparando video...*\n\n${bar(2)}` }, { quoted: msg })
@@ -201,7 +202,8 @@ async function handleImages(msg, sock, ctx) {
 
 async function handleAudio(msg, sock, ctx) {
   const jid = msg.key.remoteJid
-  const url = ctx.args[1]
+  // CORRECCIÓN: ctx.args[0] es la URL
+  const url = ctx.args[0]
   if (!url) return true
   const { key: logKey } = await sock.sendMessage(jid, { text: `🎵 *Extrayendo audio...*\n\n${bar(1)}` }, { quoted: msg })
   let audioPath = null
@@ -222,7 +224,7 @@ async function handleAudio(msg, sock, ctx) {
 async function handleMain(msg, sock, ctx) {
   const { args, info } = ctx
   const jid = msg.key.remoteJid
-  const apikey = info?.user?.apikey
+  // NOTA: Se eliminó la extracción manual de apikey según tu solicitud
   const url = args.join(' ').trim()
 
   if (!url || !isUrl(url)) {
@@ -241,7 +243,8 @@ async function handleMain(msg, sock, ctx) {
 
   try {
     await log(sock, jid, logKey, `🔗 Obteniendo informacion...\n\n${bar(1)}`)
-    const res = await global.OptiShield.callApi('tiktokdl', { url, apikey })
+    // SOLICITUD: Se elimina 'apikey' del objeto pasado, asumiendo que global.OptiShield la maneja
+    const res = await global.OptiShield.callApi('tiktokdl', { url })
     const result = res?.result
 
     if (!result?.success || res?.error) {
@@ -253,10 +256,10 @@ async function handleMain(msg, sock, ctx) {
     const videoUrl = result.file
     const audioUrl = result.audio
     const files = result.files || []
-    const infoData = result.info || {} // Corregido: 'meta' causaba conflicto con export const meta
+    const infoData = result.info || {} 
     const title = clamp(infoData.title || 'TikTok Video', MAX_TITLE)
     const author = infoData.author || infoData.username || ''
-    const thumbnail = infoData.thumbnail || infoData.cover || null // Extracción del thumbnail
+    const thumbnail = infoData.thumbnail || infoData.cover || null
     const likes = infoData.likes ? `❤️ ${Number(infoData.likes).toLocaleString()}  ` : ''
     const views = infoData.views ? `👁️ ${Number(infoData.views).toLocaleString()}` : ''
 
@@ -286,9 +289,8 @@ async function handleMain(msg, sock, ctx) {
       `\n_Elige como quieres el contenido:_`
 
     try {
-      // MENÚ INTERACTIVO CON LA IMAGEN DEL VIDEO ARRIBA
       await sendInteractiveWithImage(sock, jid, {
-        imageUrl: thumbnail, // Se muestra la portada del video de TikTok
+        imageUrl: thumbnail,
         bodyText: body,
         footerText: 'OptiShield • TikTok DL',
         buttons: buildInteractive(videoUrl, audioUrl, url),
