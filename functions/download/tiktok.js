@@ -237,11 +237,6 @@ async function handleMain(msg, sock, ctx) {
     return true
   }
 
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: `⚠️ Sin APIKEY — contacta al administrador` }, { quoted: msg })
-    return true
-  }
-
   const { key: logKey } = await sock.sendMessage(jid, { text: `⏳ *Analizando link...*\n\n${bar(0)}` }, { quoted: msg })
 
   try {
