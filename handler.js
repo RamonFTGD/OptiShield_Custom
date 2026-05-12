@@ -14,7 +14,6 @@ function cleanText(text) {
 function extractMessageContent(msg) {
     if (!msg?.message) return '';
 
-    // 1. Prioridad a respuestas interactivas (Native Flow / Buttons)
     const interactive = msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
     if (interactive) {
         try {
@@ -29,13 +28,11 @@ function extractMessageContent(msg) {
     if (msg.message?.templateButtonReplyMessage?.selectedId) return msg.message.templateButtonReplyMessage.selectedId;
     if (msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId) return msg.message.listResponseMessage.singleSelectReply.selectedRowId;
 
-    // 2. Desenvolver mensajes complejos
     let content = msg.message;
     if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
     else if (content.viewOnceMessage) content = content.viewOnceMessage.message;
     else if (content.ephemeralMessage) content = content.ephemeralMessage.message;
 
-    // 3. Texto normal o captions
     if (content?.conversation) return content.conversation;
     if (content?.extendedTextMessage?.text) return content.extendedTextMessage.text;
     if (content?.imageMessage?.caption) return content.imageMessage.caption;
@@ -103,7 +100,7 @@ export function handleEvents(sock, commandsMap, options = {}) {
             usedPrefix = prefix;
             body = text.slice(prefix.length).trim();
         } else {
-            // LÓGICA IMPORTANTE PARA BOTONES:
+
             const parts = text.split(/\s+/);
             const potentialCmd = parts[0]?.toLowerCase();
             if (!commandsMap.has(potentialCmd)) {
