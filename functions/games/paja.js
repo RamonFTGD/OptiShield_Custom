@@ -50,42 +50,39 @@ function medal(i) {
     return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
 }
 
-// Función segura para obtener nombres (Sin usar store.contacts que causa error)
 function getSafeName(msg, jid, isSender = false) {
-    // Si es el remitente, intentamos sacar el nombre del mensaje
     if (isSender && msg) {
-        // Prioridad: pushName (nombre visible en whatsapp)
         if (msg.pushName) return msg.pushName
-        // Fallback: participant name en grupos a veces viene en contextInfo, pero pushName es mejor
     }
-    
-    // Si no encontramos nada, devolvemos null para que el comando decida qué hacer
     return null
 }
 
 async function getUserStats(db, phone) {
-    // SOLO LECTURA. No guardamos aquí para no borrar otros datos del usuario accidentalmente.
+    console.log(`[DB LOG] Leyendo stats para: ${phone}`)
     const res = await db.get(phone)
-    // Si res es null o no tiene data, empezamos objeto vacío
     let userData = (res && res.data) ? res.data : {}
 
-    // Si no tiene la sección 'pajas', la inicializamos en memoria (aún no en DB)
     if (!userData.pajas) {
+        console.log(`[DB LOG] Usuario nuevo o sin datos de pajas, inicializando...`)
         userData.pajas = {
             name: '',
             sizeCm: BASE_SIZE_CM,
-            lastPaja: 0,
+            lastPajaTimestamp: 0, // <--- Timestamp explícito
             sesiones: 0,
             mayorAlza: 0,
             mayorBaja: 0,
             duelos: { ganados: 0, perdidos: 0 }
         }
+    } else {
+        // Asegurar compatibilidad si venía de versiones viejas
+        if (!userData.pajas.lastPajaTimestamp && userData.pajas.lastPaja) {
+             userData.pajas.lastPajaTimestamp = userData.pajas.lastPaja
+        }
     }
 
     const p = userData.pajas
-    // Validación de tipos por seguridad
     p.sizeCm = isNaN(p.sizeCm) ? BASE_SIZE_CM : Number(p.sizeCm)
-    p.lastPaja = Number(p.lastPaja) || 0
+    p.lastPajaTimestamp = Number(p.lastPajaTimestamp) || 0
     p.sesiones = Number(p.sesiones) || 0
     p.mayorAlza = Number(p.mayorAlza) || 0
     p.mayorBaja = Number(p.mayorBaja) || 0
@@ -96,24 +93,38 @@ async function getUserStats(db, phone) {
 }
 
 async function saveUserStats(db, phone, pajaData) {
-    // 1. Obtenemos los datos actuales del usuario para no borrar su info (monedas, inventario, etc)
+    console.log(`[DB LOG] === INICIANDO GUARDADO ===`)
+    console.log(`[DB LOG] Usuario: ${phone}`)
+    console.log(`[DB LOG] Datos a guardar (pajas):`, JSON.stringify(pajaData))
+
+    // 1. Obtenemos datos actuales para no borrar otros módulos
     const res = await db.get(phone)
     const existingData = (res && res.data) ? res.data : {}
+    console.log(`[DB LOG] Datos previos en DB:`, existingData ? 'Existentes' : 'Vacíos')
 
-    // 2. Actualizamos solo la parte de 'pajas'
+    // 2. Fusionamos (Merge)
     existingData.pajas = pajaData
 
-    // 3. Guardamos el objeto completo
-    await db.set(phone, existingData)
+    // 3. Guardamos en la nube
+    console.log(`[DB LOG] Enviando comando db.set...`)
+    const setResult = await db.set(phone, existingData)
+
+    // 4. Verificación del resultado
+    if (setResult && setResult.status === 'ok') {
+        console.log(`[DB LOG] ✅ EXITO: db.set retornó 'ok'. Datos guardados.`)
+    } else {
+        console.error(`[DB LOG] ❌ ERROR: db.set falló. Respuesta:`, setResult)
+    }
 }
 
 async function updateLeaderboard(db, phone, name, sizeCm) {
     const lbKey = 'pajas_leaderboard'
+    console.log(`[DB LOG] Actualizando Leaderboard para ${phone}...`)
+    
     const res = await db.get(lbKey)
     let list = (res && res.data && res.data.list) ? res.data.list : []
 
     const existingIndex = list.findIndex(u => u.phone === phone)
-    
     const userData = { phone, name: name || phone.split('@')[0], sizeCm, updated: Date.now() }
 
     if (existingIndex !== -1) {
@@ -121,7 +132,6 @@ async function updateLeaderboard(db, phone, name, sizeCm) {
         const isOldNumber = /^\d+$/.test(oldEntry.name)
         const isNewNumber = /^\d+$/.test(userData.name)
 
-        // Lógica para conservar nombres bonitos y no sobrescribirlos con números
         if (!isOldNumber && isNewNumber) {
             userData.name = oldEntry.name
         }
@@ -131,7 +141,13 @@ async function updateLeaderboard(db, phone, name, sizeCm) {
     }
 
     list.sort((a, b) => b.sizeCm - a.sizeCm)
-    await db.set(lbKey, { list: list.slice(0, 50) })
+    
+    const lbSetRes = await db.set(lbKey, { list: list.slice(0, 50) })
+    if (lbSetRes && lbSetRes.status === 'ok') {
+        console.log(`[DB LOG] ✅ Leaderboard actualizado correctamente.`)
+    } else {
+        console.error(`[DB LOG] ❌ Error al actualizar Leaderboard:`, lbSetRes)
+    }
 }
 
 export default async function (msg, sock, ctx) {
@@ -157,20 +173,22 @@ export default async function (msg, sock, ctx) {
     const now = Date.now()
 
     if (command === 'paja') {
-        // 1. Obtener stats (Lectura)
+        console.log(`[CMD] Ejecutando !paja para ${sender}`)
+        
+        // 1. Leer
         let pajaData = await getUserStats(db, phone)
         
-        // 2. Obtener nombre actual
+        // 2. Nombre
         const currentName = getSafeName(msg, phone, true)
-        
-        // Si tenemos nombre y no es número, lo actualizamos en el objeto pajaData
         if (currentName && !/^\d+$/.test(currentName)) {
             pajaData.name = currentName
         }
 
-        const cd = COOLDOWN_MS - (now - pajaData.lastPaja)
+        // 3. Cooldown (Usando el nuevo nombre de variable)
+        const cd = COOLDOWN_MS - (now - pajaData.lastPajaTimestamp)
 
         if (cd > 0) {
+            console.log(`[CMD] Usuario en cooldown. Faltan ${cd}ms`)
             await sock.sendMessage(chatId, {
                 text: `⏳ *Aún no puedes, necesitas recuperarte*\n\n` +
                     `🕐 Tiempo restante: *${formatCooldown(cd)}*\n\n` +
@@ -187,12 +205,12 @@ export default async function (msg, sock, ctx) {
         if (isNaN(nuevoSize)) nuevoSize = BASE_SIZE_CM
 
         pajaData.sizeCm = nuevoSize
-        pajaData.lastPaja = now
+        pajaData.lastPajaTimestamp = now // <--- ACTUALIZAMOS EL TIMESTAMP AQUI
         pajaData.sesiones++
         if (delta > pajaData.mayorAlza) pajaData.mayorAlza = delta
         if (delta < pajaData.mayorBaja) pajaData.mayorBaja = delta
 
-        // 3. Guardar stats (Escritura)
+        // 4. Guardar
         await saveUserStats(db, phone, pajaData)
         await updateLeaderboard(db, phone, pajaData.name, pajaData.sizeCm)
 
@@ -213,6 +231,7 @@ export default async function (msg, sock, ctx) {
     }
 
     if (command === 'ptop') {
+        console.log(`[CMD] Ejecutando !ptop`)
         const lbRes = await db.get('pajas_leaderboard')
         const list = (lbRes && lbRes.data && lbRes.data.list) ? lbRes.data.list : []
 
@@ -232,7 +251,6 @@ export default async function (msg, sock, ctx) {
         for (const e of top) {
             let displayName = e.name
             
-            // Si el nombre es vacío o puro número, intentar buscar el nombre guardado en su DB personal
             if (!displayName || /^\d+$/.test(displayName)) {
                 try {
                     const userStats = await getUserStats(db, e.phone)
@@ -240,14 +258,12 @@ export default async function (msg, sock, ctx) {
                         displayName = userStats.name
                     }
                 } catch (err) {
-                    console.log("Error al buscar nombre en DB:", err)
+                    console.log("[DB LOG] Error buscando nombre para top:", err)
                 }
             }
 
-            // Si sigue siendo número o vacío, formatear el número para que se vea bien (sin usar contacts)
             if (!displayName || /^\d+$/.test(displayName)) {
                 const shortNum = e.phone.split('@')[0]
-                // Si el número es largo (más de 8 digitos), mostrar últimos 4
                 displayName = shortNum.length > 8 ? `...${shortNum.slice(-4)}` : shortNum
             }
 
@@ -264,7 +280,6 @@ export default async function (msg, sock, ctx) {
             const suffix = i === 0 ? ' 👑 *(Rey penudo)*' : ''
             let displayName = e.name
             
-            // Repetir lógica de nombres para perdedores
             if (!displayName || /^\d+$/.test(displayName)) {
                 try {
                     const userStats = await getUserStats(db, e.phone)
@@ -304,25 +319,20 @@ export default async function (msg, sock, ctx) {
             return true
         }
 
+        console.log(`[CMD] Ejecutando !pduelo entre ${phone} y ${mentioned}`)
+        
         const pajaDataA = await getUserStats(db, phone)
         const pajaDataB = await getUserStats(db, mentioned)
 
-        // NOMBRE A
         const nameA_raw = getSafeName(msg, phone, true)
         if (nameA_raw && !/^\d+$/.test(nameA_raw)) pajaDataA.name = nameA_raw
         const nameA = pajaDataA.name || nameA_raw || phone.split('@')[0]
 
-        // NOMBRE B
         let nameB = pajaDataB.name
         
-        // Si B no tiene nombre bonito guardado, y no podemos buscar en contacts (error), usamos su ID
         if (!nameB || /^\d+$/.test(nameB)) {
-            // Truco extra: Si B es el mencionado, a veces el mensaje trae su nombre en la string, pero es unreliable.
-            // Lo mejor es usar su ID formateado o pedirle que use el comando paja para registrarse.
             const shortNumB = mentioned.split('@')[0]
             nameB = shortNumB.length > 8 ? `...${shortNumB.slice(-4)}` : shortNumB
-            
-            // Opcional: Guardar este nombre "feo" para que no sea null en la proxima
             if (!pajaDataB.name) pajaDataB.name = nameB
         }
 
@@ -354,7 +364,7 @@ export default async function (msg, sock, ctx) {
         statsG.duelos.ganados++
         statsP.duelos.perdidos++
 
-        // Guardar datos de ambos participantes
+        console.log(`[CMD] Guardando resultados de duelo...`)
         await saveUserStats(db, phone, pajaDataA)
         await saveUserStats(db, mentioned, pajaDataB)
         
