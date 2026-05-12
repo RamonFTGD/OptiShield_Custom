@@ -1,258 +1,186 @@
-import pino from 'pino';
-import readline from 'readline';
 import fs from 'fs';
 import path from 'path';
-import { 
-  makeWASocket, 
-  useMultiFileAuthState, 
-  fetchLatestBaileysVersion, 
-  DisconnectReason,
-  makeCacheableSignalKeyStore 
-} from '@whiskeysockets/baileys';
-import qrcode from 'qrcode-terminal';
-import NodeCache from 'node-cache';
+import url from 'url';
 
-const logger = pino({ level: 'silent' });
-const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
-const userDevicesCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
-
-const STORE_FILE = './session/store.json';
-
-const store = {
-  chats: {},
-  messages: {},
-  load() {
-    try {
-      if (fs.existsSync(STORE_FILE)) {
-        const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
-        this.chats = data.chats || {};
-        this.messages = data.messages || {};
-      }
-    } catch {}
-  },
-  save() {
-    try {
-      fs.writeFileSync(STORE_FILE, JSON.stringify({ chats: this.chats, messages: this.messages }));
-    } catch {}
-  },
-  bind(ev) {
-    ev.on('chats.set', ({ chats }) => {
-      for (const c of chats) this.chats[c.id] = c;
-    });
-    ev.on('chats.update', (updates) => {
-      for (const u of updates) {
-        if (!this.chats[u.id]) this.chats[u.id] = { id: u.id };
-        Object.assign(this.chats[u.id], u);
-      }
-    });
-    ev.on('chats.delete', (deletions) => {
-      for (const id of deletions) delete this.chats[id];
-    });
-    ev.on('messages.set', ({ messages }) => {
-      for (const m of messages) {
-        const jid = m.key.remoteJid;
-        if (!jid) continue;
-        if (!this.messages[jid]) this.messages[jid] = {};
-        this.messages[jid][m.key.id] = m;
-      }
-    });
-    ev.on('messages.upsert', ({ messages, type }) => {
-      for (const m of messages) {
-        const jid = m.key.remoteJid;
-        if (!jid) continue;
-        if (!this.messages[jid]) this.messages[jid] = {};
-        this.messages[jid][m.key.id] = m;
-      }
-    });
-    ev.on('messages.update', (updates) => {
-      for (const u of updates) {
-        const jid = u.key.remoteJid;
-        const id = u.key.id;
-        if (!jid || !id || !this.messages[jid]?.[id]) continue;
-        Object.assign(this.messages[jid][id], u.update);
-      }
-    });
-    ev.on('messages.delete', (deletions) => {
-      for (const d of deletions) {
-        if (d.keys) {
-          for (const k of d.keys) {
-            if (this.messages[k.remoteJid]?.[k.id]) delete this.messages[k.remoteJid][k.id];
-          }
-        } else if (d.jid) {
-          delete this.messages[d.jid];
-        }
-      }
-    });
-  },
-  loadMessage(jid, id) {
-    return this.messages[jid]?.[id] || null;
-  }
+const RE = {
+    INVISIBLE: /[\u200e\u200f\u202a-\u202e\u00a0]/g,
+    SPLIT: /\s+/,
 };
 
-store.load();
-setInterval(() => store.save(), 10000);
-
-function purgeClosedSessions(keys) {
-  if (!keys?.sessions) return;
-  for (const jid in keys.sessions) {
-    if (Array.isArray(keys.sessions[jid])) {
-      keys.sessions[jid] = keys.sessions[jid].filter(s => !s?.indexInfo?.closed || s.indexInfo.closed <= 0);
-    }
-  }
+function cleanText(text) {
+    return text ? text.replace(RE.INVISIBLE, ' ').trim() : '';
 }
 
-async function startConnection() {
-  const { state, saveCreds } = await useMultiFileAuthState('./session');
-  purgeClosedSessions(state.keys);
-  
-  const { version } = await fetchLatestBaileysVersion();
-  let pendingQR = null;
-  let waitingDecision = true;
-  let reconnecting = false;
+function extractMessageContent(msg) {
+    if (!msg?.message) return '';
 
-  const showQR = (qr) => {
-    console.log('═══════════════════════════════════════');
-    console.log('📱 Escanea este código QR con WhatsApp:');
-    console.log('═══════════════════════════════════════');
-    qrcode.generate(qr, { small: true });
-  };
-
-  const askPairingCode = () => {
-    return new Promise((resolve) => {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question('📱 ¿Vincular con código de 8 dígitos? (y/n): ', (answer) => {
-        waitingDecision = false;
-        if (answer.toLowerCase() === 'y') {
-          rl.question('🔢 Número con código de país (ej: 521234567890): ', async (number) => {
-            rl.close();
-            try {
-              const code = await global.conn.requestPairingCode(number.replace(/[^0-9]/g, ''));
-              console.log(`\n🟢 Código: ${code}\n`);
-            } catch (e) { console.error('❌ Error:', e.message); }
-            resolve(false);
-          });
-        } else {
-          rl.close();
-          if (pendingQR) showQR(pendingQR);
-          resolve(true);
+    // 1. Prioridad a respuestas interactivas (Native Flow / Buttons)
+    const interactive = msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    if (interactive) {
+        try {
+            const parsed = JSON.parse(interactive);
+            // Si el JSON tiene un "id", lo usamos (standard de botones nativos)
+            if (parsed.id) return parsed.id;
+        } catch (e) {
+            // Si falla el parseo, usamos el string crudo
+            return interactive;
         }
-      });
-    });
-  };
-
-  const connectionUpdate = async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      if (waitingDecision) pendingQR = qr;
-      else showQR(qr);
     }
 
-    if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      
-      if (code === DisconnectReason.loggedOut) {
-        console.log('❌ Sesión cerrada. Elimina /session y reinicia.');
-        process.exit(1);
-        return;
-      }
+    if (msg.message?.buttonsResponseMessage?.selectedButtonId) return msg.message.buttonsResponseMessage.selectedButtonId;
+    if (msg.message?.templateButtonReplyMessage?.selectedId) return msg.message.templateButtonReplyMessage.selectedId;
+    if (msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId) return msg.message.listResponseMessage.singleSelectReply.selectedRowId;
 
-      if (!reconnecting) {
-        reconnecting = true;
-        purgeClosedSessions(state.keys);
-        console.log(`⏳ Reconectando... (${code || 'Desconocido'})`);
-        setTimeout(() => global.reloadHandler(true), 1000);
-      }
-    }
+    // 2. Desenvolver mensajes complejos (ViewOnce, Ephemeral)
+    let content = msg.message;
+    if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
+    else if (content.viewOnceMessage) content = content.viewOnceMessage.message;
+    else if (content.ephemeralMessage) content = content.ephemeralMessage.message;
 
-    if (connection === 'open') {
-      reconnecting = false;
-      console.log('✅ Conectado. Sincronizando historial...');
-      try { await global.conn.sendQueuedMessages(); } catch {}
-    }
-  };
+    // 3. Texto normal o captions
+    if (content?.conversation) return content.conversation;
+    if (content?.extendedTextMessage?.text) return content.extendedTextMessage.text;
+    if (content?.imageMessage?.caption) return content.imageMessage.caption;
+    if (content?.videoMessage?.caption) return content.videoMessage.caption;
 
-  const createSocket = () => {
-    const sock = makeWASocket({
-      version,
-      logger,
-      printQRInTerminal: false,
-      browser: ["Ubuntu", "Chrome", "22.04"],
-      markOnlineOnConnect: false,
-      generateHighQualityLinkPreview: false,
-      syncFullHistory: true,
-      getMessage: async (key) => {
-        const msg = store.loadMessage(key.remoteJid, key.id);
-        return msg || { conversation: '' };
-      },
-      msgRetryCounterCache,
-      userDevicesCache,
-      keepAliveIntervalMs: 25000,
-      maxIdleTimeMs: 120000,
-      retryRequestDelayMs: 100,
-      maxMsgRetryCount: 3,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
-    });
-
-    store.bind(sock.ev);
-    return sock;
-  };
-
-  global.reloadHandler = async (restartConn) => {
-    try {
-      const { handleEvents, loadPlugins } = await import(`./handler.js?update=${Date.now()}`);
-      
-      if (!global.commandsMap) {
-        console.log('📦 Cargando plugins iniciales...');
-        global.commandsMap = await loadPlugins('./plugins');
-      }
-      
-      if (restartConn) {
-        const oldChats = global.conn?.chats || {};
-        try { global.conn?.ev?.removeAllListeners('connection.update'); } catch {}
-        try { global.conn?.ws?.close(); } catch {}
-        
-        global.conn = createSocket();
-        global.conn.ev.on('connection.update', connectionUpdate);
-        global.conn.ev.on('creds.update', saveCreds);
-        global.conn.chats = oldChats;
-      }
-      
-      global.store = store;
-
-      try {
-        global.conn.ev.removeAllListeners('messages.upsert');
-        store.bind(global.conn.ev);
-        console.log('🧹 Limpieza de listeners realizada.');
-      } catch (e) {}
-
-      global.conn.handler = handleEvents(global.conn, global.commandsMap);
-      
-      return true;
-    } catch (e) {
-      console.error('❌ reloadHandler:', e.message);
-      setTimeout(() => global.reloadHandler(true), 2000);
-      return false;
-    }
-  };
-
-  global.conn = createSocket();
-  global.conn.handler = null;
-  global.conn.ev.on('connection.update', connectionUpdate);
-  global.conn.ev.on('creds.update', saveCreds);
-
-  setTimeout(() => {
-    global.reloadHandler(false).catch(e => console.error('Error inicial:', e));
-  }, 2000);
-
-  if (!state.creds.registered) {
-    await askPairingCode();
-  }
-
-  return { sock: global.conn, store };
+    return '';
 }
 
-export { startConnection };
+export async function loadPlugins(dirPath) {
+    const commands = new Map();
+    if (!fs.existsSync(dirPath)) {
+        console.warn(`⚠️ Carpeta de plugins no encontrada: ${dirPath}`);
+        return commands;
+    }
+
+    const readDir = async (p) => {
+        const items = fs.readdirSync(p, { withFileTypes: true });
+        for (const item of items) {
+            const fullPath = path.join(p, item.name);
+            if (item.isDirectory()) {
+                await readDir(fullPath);
+            } else if (item.name.endsWith('.js')) {
+                try {
+                    const mod = await import(url.pathToFileURL(fullPath).href + `?t=${Date.now()}`);
+                    if (mod.meta?.commands && typeof mod.default === 'function') {
+                        mod.meta.commands.forEach(c => {
+                            commands.set(c.toLowerCase(), { meta: mod.meta, run: mod.default });
+                        });
+                        console.log(`✅ Plugin cargado: ${mod.meta.name} [${mod.meta.commands.join(', ')}]`);
+                    }
+                } catch (e) {
+                    console.error(`❌ Error cargando ${item.name}:`, e.message);
+                }
+            }
+        }
+    };
+    await readDir(dirPath);
+    console.log(`🚀 Total comandos cargados: ${commands.size}`);
+    return commands;
+}
+
+export function handleEvents(sock, commandsMap, options = {}) {
+    const { 
+        prefixList = ['!', '.', '#', '/'], 
+        database = null 
+    } = options;
+    
+    const handler = async ({ messages, type }) => {
+        if (type !== 'notify') return;
+        const msg = messages[0];
+        if (!msg?.message) return;
+        const chatId = msg.key.remoteJid;
+        if (chatId === 'status@broadcast') return;
+
+        const rawText = extractMessageContent(msg);
+        const text = cleanText(rawText);
+        
+        if (!text) return;
+
+        const prefix = prefixList.find(p => text.startsWith(p));
+        let body = text;
+        let usedPrefix = '';
+
+        if (prefix) {
+            usedPrefix = prefix;
+            body = text.slice(prefix.length).trim();
+        } else {
+            // LÓGICA IMPORTANTE PARA BOTONES:
+            // Si no hay prefijo, verificamos si el texto coincide con un comando conocido.
+            // Esto permite que botones que envían solo el ID (ej: "ping") funcionen.
+            const parts = text.split(/\s+/);
+            const potentialCmd = parts[0]?.toLowerCase();
+            
+            if (!commandsMap.has(potentialCmd)) {
+                // Si no es un comando y no tiene prefijo, lo ignoramos.
+                return;
+            }
+            // Si es un comando válido (ej: "ping"), dejamos que 'body' siga siendo el texto completo.
+        }
+
+        const parts = body.split(/\s+/);
+        const commandName = parts[0]?.toLowerCase();
+        const args = parts.slice(1);
+
+        const cmd = commandsMap.get(commandName);
+        if (!cmd) return;
+
+        console.log(`👉 Ejecutando: ${commandName} | Args: ${args.join(' ')}`);
+
+        const ctx = {
+            command: commandName,
+            args: args, 
+            text: args.join(' '),
+            body: text,
+            prefix: usedPrefix,
+            chatId: chatId,
+            isGroup: chatId.endsWith('@g.us'),
+            sender: msg.key.participant || chatId,
+            msg: msg,
+            sock: sock,
+            db: database,
+            info: { user: { apikey: database?.apikey || global.apikey } }
+        };
+
+        try {
+            await cmd.run(msg, sock, ctx);
+        } catch (e) {
+            console.error(`Error ejecutando ${commandName}:`, e);
+            sock.sendMessage(chatId, { text: `❌ Error: ${e.message}` }, { quoted: msg }).catch(() => {});
+        }
+    };
+    
+    sock.ev.on('messages.upsert', handler);
+    return handler;
+}
+
+export function watchPlugins(dirPath, commandsMap) {
+    if (!fs.existsSync(dirPath)) {
+        console.warn('⚠️ No se puede observar plugins: carpeta no existe.');
+        return;
+    }
+
+    fs.watch(dirPath, { recursive: true }, async (eventType, filename) => {
+        if (!filename || !filename.endsWith('.js')) return;
+        
+        const fullPath = path.join(dirPath, filename);
+        
+        setTimeout(async () => {
+            try {
+                console.log(`🔄 Detectado cambio en: ${filename}. Recargando...`);
+                
+                const moduleUrl = url.pathToFileURL(fullPath).href + `?update=${Date.now()}`;
+                const mod = await import(moduleUrl);
+                
+                if (mod.meta?.commands) {
+                    mod.meta.commands.forEach(c => {
+                        commandsMap.set(c.toLowerCase(), { meta: mod.meta, run: mod.default });
+                    });
+                    console.log(`✅ Plugin recargado: ${mod.meta.name}`);
+                }
+            } catch (err) {
+                console.error(`❌ Error recargando ${filename}:`, err.message);
+            }
+        }, 500);
+    });
+}
