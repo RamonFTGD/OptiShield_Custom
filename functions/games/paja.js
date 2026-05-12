@@ -49,6 +49,22 @@ function medal(i) {
     return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
 }
 
+// Función segura para obtener nombres compatible con todas las versiones de Baileys
+async function getUserName(sock, jid) {
+    try {
+        if (sock.store?.contacts?.[jid]) {
+            return sock.store.contacts[jid].name || 
+                   sock.store.contacts[jid].notify || 
+                   sock.store.contacts[jid].verifiedName || 
+                   jid.split('@')[0];
+        }
+        if (sock.contacts?.[jid]) {
+            return sock.contacts[jid].name || jid.split('@')[0];
+        }
+    } catch (e) {}
+    return jid.split('@')[0];
+}
+
 async function getUserStats(db, phone) {
     const key = `pajas_${phone}`
     const res = await db.get(key)
@@ -106,7 +122,8 @@ export default async function (msg, sock, ctx) {
     const args = fullText.trim().split(/\s+/)
     const command = args[0].toLowerCase().replace(/^[.!/#$]/, '')
     const now = Date.now()
-    const userName = await sock.getName(phone).catch(() => phone.split('@')[0])
+    // CORRECCIÓN AQUÍ: Usar getUserName en lugar de sock.getName
+    const userName = await getUserName(sock, phone)
 
     if (command === 'paja') {
         const stat = await getUserStats(db, phone)
@@ -135,15 +152,15 @@ export default async function (msg, sock, ctx) {
         const signo = delta >= 0 ? `+${delta}` : `${delta}`
         const comentario = comentarioDelta(delta)
 
-        let msg = `🍆 *RESULTADO DE LA SESIÓN*\n`
-        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
-        msg += `📏 Antes:  *${formatSize(anterior)}*\n`
-        msg += `📐 Cambio: *${signo} cm*\n`
-        msg += `📏 Ahora:  *${formatSize(stat.sizeCm)}*\n\n`
-        msg += `${comentario}\n\n`
-        msg += `🗓️ Sesión #${stat.sesiones} · ⏰ Próxima en *23h*`
+        let textMsg = `🍆 *RESULTADO DE LA SESIÓN*\n`
+        textMsg += `━━━━━━━━━━━━━━━━━━━━\n\n`
+        textMsg += `📏 Antes:  *${formatSize(anterior)}*\n`
+        textMsg += `📐 Cambio: *${signo} cm*\n`
+        textMsg += `📏 Ahora:  *${formatSize(stat.sizeCm)}*\n\n`
+        textMsg += `${comentario}\n\n`
+        textMsg += `🗓️ Sesión #${stat.sesiones} · ⏰ Próxima en *23h*`
 
-        await sock.sendMessage(chatId, { text: msg }, { quoted: msg })
+        await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
     }
 
@@ -158,27 +175,27 @@ export default async function (msg, sock, ctx) {
             return true
         }
 
-        let msg = `🍆 *TOP 10 — LOS MÁS DOTADOS DEL GRUPO*\n`
-        msg += `_"Porque en este grupo lo que importa es el tamaño"_\n`
-        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
+        let textMsg = `🍆 *TOP 10 — LOS MÁS DOTADOS DEL GRUPO*\n`
+        textMsg += `_"Porque en este grupo lo que importa es el tamaño"_\n`
+        textMsg += `━━━━━━━━━━━━━━━━━━━━\n\n`
 
         const top = list.slice(0, 10)
 
         top.forEach((e, i) => {
-            msg += `${medal(i)} *${e.name}*\n`
-            msg += `   📏 ${formatSize(e.sizeCm)}\n\n`
+            textMsg += `${medal(i)} *${e.name}*\n`
+            textMsg += `   📏 ${formatSize(e.sizeCm)}\n\n`
         })
 
         const losers = [...list].sort((a, b) => a.sizeCm - b.sizeCm).slice(0, 3)
 
-        msg += `━━━━━━━━━━━━━━━━━━━━\n`
-        msg += `🪦 *El podio de los penudos:*\n`
+        textMsg += `━━━━━━━━━━━━━━━━━━━━\n`
+        textMsg += `🪦 *El podio de los penudos:*\n`
         losers.forEach((e, i) => {
             const suffix = i === 0 ? ' 👑 *(Rey penudo)*' : ''
-            msg += `  ${i + 1}. ${e.name} — ${formatSize(e.sizeCm)}${suffix}\n`
+            textMsg += `  ${i + 1}. ${e.name} — ${formatSize(e.sizeCm)}${suffix}\n`
         })
 
-        await sock.sendMessage(chatId, { text: msg }, { quoted: msg })
+        await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
     }
 
@@ -205,7 +222,8 @@ export default async function (msg, sock, ctx) {
         const statB = await getUserStats(db, mentioned)
 
         const nameA = userName
-        const nameB = await sock.getName(mentioned).catch(() => mentioned.split('@')[0])
+        // CORRECCIÓN AQUÍ: Usar getUserName en lugar de sock.getName
+        const nameB = await getUserName(sock, mentioned)
 
         const sizeA = statA.sizeCm
         const sizeB = statB.sizeCm
@@ -252,16 +270,16 @@ export default async function (msg, sock, ctx) {
         ]
         const frase = frases[rnd(0, frases.length - 1)]
 
-        let msg = `⚔️ *RESULTADO DEL DUELO*\n`
-        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
-        msg += `🅰️ ${nameA}: *${formatSize(sizeA)}*\n`
-        msg += `🅱️ ${nameB}: *${formatSize(sizeB)}*\n\n`
-        msg += `🏆 *¡GANADOR: ${tagG}!*\n`
-        msg += `📏 Ganó por *${diferencia} cm* de diferencia\n\n`
-        msg += `💬 _${frase}_\n\n`
-        msg += `📊 Duelos de ${tagG}: ✅ ${statA.duelos.ganados}G / ❌ ${statA.duelos.perdidos}P`
+        let textMsg = `⚔️ *RESULTADO DEL DUELO*\n`
+        textMsg += `━━━━━━━━━━━━━━━━━━━━\n\n`
+        textMsg += `🅰️ ${nameA}: *${formatSize(sizeA)}*\n`
+        textMsg += `🅱️ ${nameB}: *${formatSize(sizeB)}*\n\n`
+        textMsg += `🏆 *¡GANADOR: ${tagG}!*\n`
+        textMsg += `📏 Ganó por *${diferencia} cm* de diferencia\n\n`
+        textMsg += `💬 _${frase}_\n\n`
+        textMsg += `📊 Duelos de ${tagG}: ✅ ${statA.duelos.ganados}G / ❌ ${statA.duelos.perdidos}P`
 
-        await sock.sendMessage(chatId, { text: msg }, { quoted: msg })
+        await sock.sendMessage(chatId, { text: textMsg }, { quoted: msg })
         return true
     }
 
