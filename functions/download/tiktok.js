@@ -144,7 +144,7 @@ async function sendInteractiveWithImage(sock, jid, { imageUrl, bodyText, footerT
 
 async function handleVideo(msg, sock, ctx) {
   const jid = msg.key.remoteJid
-  const url = (ctx.body || ctx.args?.join(' ') || '').trim()
+  const url = ctx.args[1].trim()
   if (!url) return true
 
   const { key: logKey } = await sock.sendMessage(jid, { text: `🎬 *Preparando video...*\n\n${bar(2)}` }, { quoted: msg })
@@ -201,7 +201,7 @@ async function handleImages(msg, sock, ctx) {
 
 async function handleAudio(msg, sock, ctx) {
   const jid = msg.key.remoteJid
-  const url = (ctx.body || ctx.args?.join(' ') || '').trim()
+  const url = ctx.args[1].trim()
   if (!url) return true
   const { key: logKey } = await sock.sendMessage(jid, { text: `🎵 *Extrayendo audio...*\n\n${bar(1)}` }, { quoted: msg })
   let audioPath = null
