@@ -27,7 +27,7 @@ function getAvatarUrl(owner) {
 }
 
 export default async function (msg, sock, ctx) {
-  const { apikey, text } = ctx
+  const { text } = ctx
   const chatId = msg.key.remoteJid
   const args = text.trim().split(/\s+/)
 
@@ -49,7 +49,7 @@ export default async function (msg, sock, ctx) {
   const edit = async (text) => { try { await sock.sendMessage(chatId, { text, edit: statusMsg.key }) } catch { } }
 
   try {
-    const searchData = await global.OptiShield.callApi('github', { query, apikey })
+    const searchData = await global.OptiShield.callApi('github', { query })
 
     if (searchData.error || !searchData?.result?.results?.length) {
       await edit(`❌ ${searchData?.error || 'No se encontraron repositorios'}`)
