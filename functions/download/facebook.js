@@ -39,7 +39,6 @@ async function updateLog(sock, chatId, logKey, text) {
   try { await sock.sendMessage(chatId, { text, edit: logKey }) } catch { }
 }
 
-// ── Convierte video URL a audio MP3 con ffmpeg ──
 async function extractAudio(videoUrl) {
   return new Promise((resolve, reject) => {
     const outPath = join(tmpdir(), `fb_audio_${randomBytes(6).toString('hex')}.mp3`)
@@ -85,7 +84,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  // ── Comando oculto: fb_audio <url> ──
   if (command === 'fb_audio') {
     const videoUrl = text.trim()
     if (!videoUrl) return true
@@ -110,7 +108,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  // ── Comando normal: fb <url> ──
   if (!isUrl(text)) {
     await sock.sendMessage(chatId, {
       text: '❌ Debes enviar un link de Facebook\n\n📝 Ejemplo:\n`.fb https://www.facebook.com/xxx/videos/xxx`'
@@ -123,11 +120,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   try {
     const { key } = await sock.sendMessage(chatId, {
       text: `⏳ Analizando link...\n\n${progressBar(0)}`
@@ -136,7 +128,7 @@ export default async function (msg, sock, ctx) {
 
     await updateLog(sock, chatId, logKey, `🔗 Obteniendo información...\n\n${progressBar(1)}`)
 
-    const res = await global.OptiShield.callApi('facebookdl', { url: text, apikey })
+    const res = await global.OptiShield.callApi('facebookdl', { url: text })
     const resultData = res?.result?.data || res?.data
 
     if (!resultData || res?.result?.success === false) {
@@ -156,7 +148,6 @@ export default async function (msg, sock, ctx) {
       `📹 *${title}*\n${duration ? `⏱️ ${duration}\n` : ''}\n${progressBar(2)}\n\n🎬 Preparando opciones...`
     )
 
-    // ── Botones — los IDs disparan fb_video y fb_audio directamente ──
     await sendInteractiveMessage(sock, chatId, {
       title: '📘 Facebook Video',
       text: `📹 *${title}*\n${duration ? `⏱️ Duración: ${duration}\n` : ''}\n\n¿Cómo quieres el contenido?`,
