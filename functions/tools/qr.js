@@ -39,12 +39,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   const id       = randomUUID()
   const tmpPath  = path.join(TMP, `${id}.png`)
 
@@ -52,7 +46,6 @@ export default async function (msg, sock, ctx) {
     await sock.sendMessage(chatId, { react: { text: '⚙️', key: msg.key } })
 
     const apiResponse = await global.OptiShield.callApi('qr-generator', {
-      apikey,
       text: args,
       size: 400
     })
