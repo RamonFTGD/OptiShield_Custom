@@ -106,12 +106,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   const username = msg.pushName || 'Usuario'
   const userJid  = msg.key.participant || msg.key.remoteJid
   const avatar   = await getAvatar(sock, userJid)
