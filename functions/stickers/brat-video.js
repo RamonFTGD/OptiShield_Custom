@@ -24,16 +24,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(
-      chatId,
-      { text: '⚠️ APIKEY no disponible' },
-      { quoted: msg }
-    )
-    return true
-  }
-
   try {
 
     await sock.sendMessage(
@@ -42,7 +32,7 @@ export default async function (msg, sock, ctx) {
       { quoted: msg }
     )
 
-    const res = await global.OptiShield.callApi('bratvideo', { text, apikey })
+    const res = await global.OptiShield.callApi('bratvideo', { text })
 
     if (res.error) {
       await sock.sendMessage(chatId, { text: res.error }, { quoted: msg })
