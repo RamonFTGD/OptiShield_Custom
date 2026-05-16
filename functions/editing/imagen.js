@@ -82,7 +82,6 @@ async function sendInteractiveWithImage(sock, jid, { imageUrl, bodyText, footerT
 }
 
 export default async function (msg, sock, ctx) {
-  const apikey = ctx.apikey
   try {
     const jid    = msg.key.remoteJid
     const quoted = msg.message?.extendedTextMessage?.contextInfo
@@ -102,7 +101,7 @@ export default async function (msg, sock, ctx) {
         await sock.sendMessage(jid, { text: '❌ Especifica un efecto\nEjemplo: URL | brightness | 1.5' }, { quoted: msg })
         return true
       }
-      return await applyEffect(msg, sock, imageUrl, parts[1].toLowerCase(), parts[2] || '', apikey)
+      return await applyEffect(msg, sock, imageUrl, parts[1].toLowerCase(), parts[2] || '')
     }
 
     if (!quoted?.quotedMessage) {
@@ -214,12 +213,12 @@ async function showMenu(msg, sock, imageUrl) {
   return true
 }
 
-async function applyEffect(msg, sock, imageUrl, effect, value, apikey) {
+async function applyEffect(msg, sock, imageUrl, effect, value ) {
   const jid = msg.key.remoteJid
   try {
     await sock.sendMessage(jid, { text: `⏳ Aplicando efecto: *${effect}*...` }, { quoted: msg })
 
-    let params = { url: imageUrl, effect, apikey }
+    let params = { url: imageUrl, effect }
 
     switch (effect) {
       case 'brightness': case 'contrast': case 'saturate': case 'sharpen':
@@ -240,7 +239,6 @@ async function applyEffect(msg, sock, imageUrl, effect, value, apikey) {
     }
 
     const res = await global.OptiShield.callApi('editimg', params)
-    delete params.apikey
 
     if (!res.result?.ok || !res.result?.url) {
       await sock.sendMessage(jid, { text: `❌ ${res.result?.error || 'Error al procesar la imagen'}` }, { quoted: msg })
