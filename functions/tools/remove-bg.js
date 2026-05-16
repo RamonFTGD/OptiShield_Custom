@@ -54,12 +54,6 @@ async function uploadToTmpApi(imageBuffer, apikey) {
 export default async function (msg, sock, ctx) {
   const { text, info } = ctx
   const chatId = msg.key.remoteJid
-  const apikey = info?.user?.apikey
-
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
 
   const urlInText  = text.match(/https?:\/\/\S+/)?.[0]
   const quoted     = getQuoted(msg)
@@ -95,7 +89,7 @@ export default async function (msg, sock, ctx) {
 
     await updateLog(sock, chatId, logKey, '✂️ Procesando imagen...')
 
-    const dl = await global.OptiShield.callApi('removebg', { link: imageUrl, apikey })
+    const dl = await global.OptiShield.callApi('removebg', { link: imageUrl })
 
     if (dl.error || !dl?.result?.image) {
       await updateLog(sock, chatId, logKey, `❌ ${dl.error || 'No se pudo eliminar el fondo.'}`)
