@@ -46,16 +46,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
   
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(
-      chatId,
-      { text: '⚠️ APIKEY no disponible' },
-      { quoted: msg }
-    )
-    return true
-  }
-  
   await sock.sendMessage(
     chatId,
     { react: { text: "🎵", key: msg.key } }
@@ -71,9 +61,7 @@ export default async function (msg, sock, ctx) {
 
     const isUrl = query.includes('youtube.com') || query.includes('youtu.be')
     
-    const params = {
-      apikey: apikey
-    }
+    const params = {}
     
     if (isUrl) {
       params.url = query
@@ -83,7 +71,6 @@ export default async function (msg, sock, ctx) {
     
 
     const apiResponse = await global.OptiShield.callApi("yt-lyrics", params)
-    console.log(apiResponse)
     
     if (apiResponse.result?.error) {
       await sock.sendMessage(
