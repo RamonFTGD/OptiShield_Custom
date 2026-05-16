@@ -60,14 +60,8 @@ export default async function (msg, sock, ctx) {
 
     const uploadResponse = await global.OptiShield.uploadFile(buffer)
     const mediaUrl = uploadResponse.archivo
-    const apikey = info?.user?.apikey
 
-    if (!apikey) {
-      await update('⚠️ APIKEY no disponible')
-      return true
-    }
-
-    const apiResponse = await global.OptiShield.callApi('whatmusic', { apikey, url: mediaUrl })
+    const apiResponse = await global.OptiShield.callApi('whatmusic', { url: mediaUrl })
 
     if (!apiResponse.result?.success) throw new Error('No se pudo reconocer la canción')
 
