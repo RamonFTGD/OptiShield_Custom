@@ -58,7 +58,7 @@ function getUserPhone(mensaje) {
 }
 
 export default async function (mensaje, sock, ctx) {
-  const { chatId, apikey } = ctx
+  const { chatId } = ctx
 
   const phone = getUserPhone(mensaje)
   if (!phone) return true
@@ -81,7 +81,7 @@ export default async function (mensaje, sock, ctx) {
   }, { quoted: mensaje })
 
   try {
-    const result = await global.OptiShield.callApi('gifSearch', { query, apikey })
+    const result = await global.OptiShield.callApi('gifSearch', { query })
     const gifs = result?.result?.gifs || []
 
     if (!gifs.length) {
