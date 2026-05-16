@@ -48,17 +48,11 @@ export default async function (msg, sock, ctx) {
     }
 
     const [text, username, avatar, apiType] = parts
-    const apikey = info?.user?.apikey
-
-    if (!apikey) {
-      await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-      return true
-    }
 
     await sock.sendMessage(chatId, { text: '⏳ Generando quoted...' }, { quoted: msg })
 
     try {
-      const params = { message: text, username, avatar, apikey }
+      const params = { message: text, username, avatar }
 
       if (apiType === 'quoted-instagram') {
         params.image = info?.bot?.menu_image || 'https://i.imgur.com/8jfJiqv.jpeg'
