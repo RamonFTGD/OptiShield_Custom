@@ -26,7 +26,7 @@ export default async function (msg, sock, ctx) {
       text: '📸 Generando screenshot, espera...'
     }, { quoted: msg })
 
-    const data = await global.OptiShield.callApi('ssweb', { url, apikey: info.user.apikey })
+    const data = await global.OptiShield.callApi('ssweb', { url })
     if (data.error) {
       await sock.sendMessage(chatId, { text: data.error }, { quoted: msg })
     }
