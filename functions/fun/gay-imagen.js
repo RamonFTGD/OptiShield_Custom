@@ -18,7 +18,6 @@ export default async function (msg, sock, ctx) {
 
   let targetJid = null
 
-  // 📌 Usuario objetivo
   if (msg.message?.extendedTextMessage?.contextInfo?.participant) {
     targetJid = msg.message.extendedTextMessage.contextInfo.participant
   }
@@ -34,7 +33,6 @@ export default async function (msg, sock, ctx) {
 
   try {
 
-    // 📸 Obtener foto del usuario
     let avatar
 
     try {
@@ -43,15 +41,13 @@ export default async function (msg, sock, ctx) {
       avatar = 'https://wallpapers.com/images/hd/profile-picture-vmrnbslcc3uzczsm.jpg'
     }
 
-    // 📛 Obtener nombre
-    let name = targetJid.split('@')[0]
+    let name = targetJid
 
     try {
       const contact = await sock.onWhatsApp(targetJid)
       if (contact?.[0]?.notify) name = contact[0].notify
     } catch {}
 
-    // ⚠️ Si es Ramón Owner - OptiShield usar foto del ejecutor
     if (name === 'Ramón Owner - OptiShield') {
       try {
         avatar = await sock.profilePictureUrl(sender, 'image')
@@ -60,7 +56,6 @@ export default async function (msg, sock, ctx) {
       }
     }
 
-    // 🚀 Llamar API
     const api = await global.OptiShield.callApi(
       "gay-imagen-quoted",
       {
