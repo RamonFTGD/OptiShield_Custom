@@ -46,16 +46,10 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-    return true
-  }
-
   try {
     await sock.sendMessage(chatId, { react: { text: '🌡️', key: msg.key } })
 
-    const apiResponse = await global.OptiShield.callApi('weather', { apikey, city: args, lang: 'es' })
+    const apiResponse = await global.OptiShield.callApi('weather', { city: args, lang: 'es' })
     const r = apiResponse?.result
 
     if (!r?.ok) throw new Error(r?.error || 'No se pudo obtener el clima')
