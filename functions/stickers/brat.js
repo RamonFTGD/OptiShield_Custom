@@ -23,20 +23,10 @@ export default async function (msg, sock, ctx) {
     )
     return true
   }
-
-  const apikey = info?.user?.apikey
-  if (!apikey) {
-    await sock.sendMessage(
-      chatId,
-      { text: '⚠️ APIKEY no disponible' },
-      { quoted: msg }
-    )
-    return true
-  }
-
+  
   const res = await global.OptiShield.callApi(
       'brat',
-      { text, apikey }
+      { text }
     )
 
     if (res.error) {
