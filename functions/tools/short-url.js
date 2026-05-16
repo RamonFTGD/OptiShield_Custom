@@ -110,7 +110,7 @@ export default async function (msg, sock, ctx) {
     await sock.sendMessage(chatId, { react: { text: '⚙️', key: msg.key } })
 
     const apiResponse = await global.OptiShield.callApi('url-short', {
-      apikey, url, ...(code && { code })
+      url, ...(code && { code })
     })
 
     const result = apiResponse?.result
