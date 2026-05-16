@@ -90,12 +90,6 @@ function buildRiskSection(risk) {
 export default async function (msg, sock, ctx) {
     const chatId = msg.key.remoteJid
     const ip     = ctx.args[0]?.trim()
-    const apikey = ctx?.info?.user?.apikey
-
-    if (!apikey) {
-        await sock.sendMessage(chatId, { text: '⚠️ APIKEY no disponible' }, { quoted: msg })
-        return true
-    }
 
     if (!ip) {
         await sock.sendMessage(chatId, {
@@ -131,7 +125,7 @@ export default async function (msg, sock, ctx) {
 
         const update = text => sock.sendMessage(chatId, { text, edit: statusKey }).catch(() => {})
 
-        const res = await global.OptiShield.callApi('IPLocate', { ip, apikey })
+        const res = await global.OptiShield.callApi('IPLocate', { ip })
 
         const r = res?.result?.result
 
