@@ -9,12 +9,6 @@ export const meta = {
 export default async function (msg, sock, ctx) {
   const jid    = msg.key.remoteJid
   const query  = ctx.text.trim()
-  const apikey = ctx?.info?.user?.apikey
-
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
-    return true
-  }
 
   if (!query) {
     await sock.sendMessage(jid, {
@@ -25,7 +19,7 @@ export default async function (msg, sock, ctx) {
 
   await sock.sendMessage(jid, { text: '🔍 Buscando letra en Genius...' }, { quoted: msg })
 
-  const res = await global.OptiShield.callApi('genius-search', { q: query, limit: '1', lyrics: 'true', apikey })
+  const res = await global.OptiShield.callApi('genius-search', { q: query, limit: '1', lyrics: 'true' })
 
   if (res.error || !res?.result?.results?.length) {
     await sock.sendMessage(jid, { text: '❌ No se encontró letra para esa canción.' })
