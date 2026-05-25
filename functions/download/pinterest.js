@@ -56,7 +56,6 @@ async function extractAudio(videoUrl) {
 export default async function (msg, sock, ctx) {
   const { command, text, args } = ctx
   const jid    = msg.key.remoteJid
-  const apikey = ctx?.apikey
 
   // ── Comando oculto: pin_image <url directa> ──
   if (command === 'pin_image') {
@@ -197,11 +196,6 @@ export default async function (msg, sock, ctx) {
     return true
   }
 
-  if (!apikey) {
-    await sock.sendMessage(jid, { text: '❌ No tienes API Key válida.' })
-    return true
-  }
-
   const { key: logKey } = await sock.sendMessage(jid, {
     text: `⏳ Analizando link...\n\n${progressBar(0)}`
   }, { quoted: msg })
@@ -209,7 +203,7 @@ export default async function (msg, sock, ctx) {
   try {
     await updateLog(sock, jid, logKey, `🔗 Obteniendo contenido...\n\n${progressBar(1)}`)
 
-    const res = await global.OptiShield.callApi('pinterestdl', { url, apikey })
+    const res = await global.OptiShield.callApi('pinterestdl', { url })
 
     if (res.error || !res?.result?.success) {
       await updateLog(sock, jid, logKey,
