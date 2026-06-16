@@ -1,235 +1,142 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
+import { isOwner, reply, editLog } from '../../lib/utils.js'
 
 export const meta = {
   name: 'update',
-  commands: ['update', 'actualizar'],
+  commands: ['update', 'actualizar', 'gitpull'],
   priority: 0,
   class: 'Sistema',
-  desc: 'Actualiza el bot desde el repositorio y lo reinicia',
+  ownerOnly: true,
+  description: 'Actualiza el bot desde el repositorio Git (solo owners)'
 }
 
-const ALLOWED_NUMBERS = global.owners
+const ALLOWED_REMOTES = ['github.com', 'gitlab.com', 'bitbucket.org']
 
-function isOwner(sender) {
-  if (!sender) return false;
-  if (!Array.isArray(ALLOWED_NUMBERS)) return false;
-  return ALLOWED_NUMBERS.includes(sender);
-}
-
-function getGitRemoteUrl() {
+function isSafeUrl(url) {
   try {
-    return execSync('git remote get-url origin 2>/dev/null', { 
-      encoding: 'utf8' 
-    }).trim();
+    const parsed = new URL(url)
+    return ALLOWED_REMOTES.some(r => parsed.hostname.includes(r))
   } catch {
-    return null;
+    // SSH URLs like git@github.com:user/repo.git
+    return ALLOWED_REMOTES.some(r => url.includes(r))
   }
 }
 
-function isGitRepo() {
+function execSafe(cmd, options = {}) {
   try {
-    execSync('git rev-parse --is-inside-work-tree 2>/dev/null', { 
-      encoding: 'utf8' 
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function executeCommand(command, options = {}) {
-  try {
-    const result = execSync(command, {
+    const result = execSync(cmd, {
       cwd: process.cwd(),
       encoding: 'utf8',
       timeout: 60000,
-      ...options
-    });
-    return { success: true, output: result.trim() };
+      ...options,
+    })
+    return { success: true, output: result.trim() }
   } catch (error) {
-    return { 
-      success: false, 
-      output: error.stderr?.trim() || error.message 
-    };
+    return { success: false, output: error.stderr?.trim() || error.message }
   }
 }
 
 function protectConfig() {
-  const configPath = path.join(process.cwd(), 'optishield.json');
-  let backupConfig = null;
-  
+  const configPath = path.join(process.cwd(), 'optishield.json')
+  let backupConfig = null
   if (fs.existsSync(configPath)) {
     try {
-      backupConfig = fs.readFileSync(configPath, 'utf-8');
-      console.log('🛡️ [UPDATE] Respaldo de optishield.json guardado en memoria.');
-    } catch (e) {
-      console.error('⚠️ [UPDATE] No se pudo leer optishield.json para respaldarlo.');
-    }
+      backupConfig = fs.readFileSync(configPath, 'utf-8')
+    } catch {}
   }
-  
-  return { configPath, backupConfig };
+  return { configPath, backupConfig }
 }
 
 function restoreConfig({ configPath, backupConfig }) {
   if (backupConfig) {
     try {
-      fs.writeFileSync(configPath, backupConfig, 'utf-8');
-      console.log('✅ [UPDATE] optishield.json restaurado exitosamente.');
-      return true;
-    } catch (e) {
-      console.error('❌ [UPDATE] Error crítico: No se pudo restaurar optishield.json!!!', e.message);
-      return false;
-    }
+      fs.writeFileSync(configPath, backupConfig, 'utf-8')
+      return true
+    } catch {}
   }
-  return false;
+  return false
 }
 
 export default async function (msg, sock, ctx) {
-  const { chatId, sender, args } = ctx;
+  const { chatId, sender, args } = ctx
 
+  // 🔒 SOLO OWNERS
   if (!isOwner(sender)) {
-    return sock.sendMessage(
-      chatId, 
-      { text: '❌ *Acceso denegado*\n\nEste comando solo puede ser usado por el owner del bot.' }, 
-      { quoted: msg }
-    );
+    await reply(sock, chatId, '❌ *Acceso denegado.* Solo el owner del bot puede actualizar.', msg)
+    return true
   }
 
-  await sock.sendMessage(chatId, { react: { text: '⏳', key: msg.key } }).catch(() => {});
+  await sock.sendMessage(chatId, { react: { text: '⏳', key: msg.key } }).catch(() => {})
 
-  const forceClone = args.includes('--force') || args.includes('-f');
-  const noInstall = args.includes('--no-install') || args.includes('-n');
-  const repoUrl = args.find(a => a.startsWith('http')) || null;
+  const forceClone = args.includes('--force') || args.includes('-f')
+  const noInstall = args.includes('--no-install') || args.includes('-n')
+  const repoUrl = args.find(a => a.startsWith('http') || a.includes('@'))
 
-  let statusMsg = await sock.sendMessage(
-    chatId,
-    { text: `🔄 *ACTUALIZANDO BOT...*\n\n⏳ Verificando estado del repositorio...` },
-    { quoted: msg }
-  );
+  // 🔒 Validar URL del repo
+  if (repoUrl && !isSafeUrl(repoUrl)) {
+    await reply(sock, chatId, '❌ Solo se permiten repositorios de GitHub, GitLab o Bitbucket.', msg)
+    return true
+  }
 
-  const gitRepo = isGitRepo();
-  const remoteUrl = getGitRemoteUrl();
-  let updateText = `🔄 *ACTUALIZANDO BOT...*\n\n`;
+  const { key: statusKey } = await sock.sendMessage(chatId, { text: '🔄 *ACTUALIZANDO BOT...*\n\n⏳ Verificando...' }, { quoted: msg })
+  const edit = (text) => sock.sendMessage(chatId, { text, edit: statusKey }).catch(() => {})
 
-  const configBackup = protectConfig();
+  const configBackup = protectConfig()
+  const gitRepo = fs.existsSync(path.join(process.cwd(), '.git'))
 
   if (!gitRepo || forceClone) {
-    const urlToUse = repoUrl || remoteUrl;
-    
+    const urlToUse = repoUrl || execSafe('git remote get-url origin 2>/dev/null').output
     if (!urlToUse) {
-      await sock.sendMessage(
-        chatId,
-        { 
-          text: '❌ *Error*\n\nNo se encontró URL del repositorio.\n\n💡 Usa: `.update <url-del-repo>`\nO agrega el remote con: `git remote add origin <url>`',
-          edit: statusMsg.key
-        }
-      );
-      return;
+      await edit('❌ No hay repositorio configurado.\nUsa: .update https://github.com/user/repo.git')
+      return
     }
 
-    updateText += `📦 *Modo:* Git Clone${forceClone ? ' (forzado)' : ''}\n`;
-    updateText += `🔗 *URL:* ${urlToUse}\n\n`;
-    updateText += `⏳ Clonando repositorio...\n`;
-    
-    await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
+    await edit(`📦 Clonando repositorio...\n🔗 ${urlToUse}`)
+    if (forceClone) execSafe('rm -rf .git 2>/dev/null')
 
-    if (forceClone) {
-      executeCommand('rm -rf .git 2>/dev/null');
+    const clone = execSafe(`git clone ${urlToUse} . --force 2>&1`)
+    if (!clone.success) {
+      await edit(`❌ Error al clonar:\n${clone.output.slice(-300)}`)
+      return
     }
 
-    const cloneResult = executeCommand(`git clone ${urlToUse} . --force 2>&1`);
-    
-    if (!cloneResult.success) {
-      executeCommand('rm -rf temp_update_clone 2>/dev/null');
-      const altResult = executeCommand(`git clone ${urlToUse} temp_update_clone 2>&1`);
-      
-      if (altResult.success) {
-        executeCommand('cp -rf temp_update_clone/. . 2>/dev/null');
-        executeCommand('rm -rf temp_update_clone');
-        updateText += `✅ *Clonado exitoso (método alternativo)*\n\n`;
-      } else {
-        updateText += `❌ *Error al clonar:*\n\`\`\`${cloneResult.output.slice(-300)}\`\`\`\n\n`;
-        await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
-        return;
-      }
-    } else {
-      updateText += `✅ *Clonado exitoso*\n\n`;
-    }
-
-    if (restoreConfig(configBackup)) {
-      updateText += `🛡️ *Archivo optishield.json protegido y restaurado*\n\n`;
-    }
-
+    if (restoreConfig(configBackup)) await edit(`✅ Clonado exitoso\n🛡️ Config protegido\n\n📦 Instalando dependencias...`)
+    else await edit(`✅ Clonado exitoso\n\n📦 Instalando dependencias...`)
   } else {
-    updateText += `📦 *Modo:* Git Pull\n`;
-    updateText += `🔗 *Remote:* ${remoteUrl}\n\n`;
-    updateText += `⏳ Obteniendo cambios...\n`;
-    
-    await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
+    const branch = execSafe('git rev-parse --abbrev-ref HEAD').output || 'main'
+    await edit(`📦 Git Pull (${branch})\n⏳ Obteniendo cambios...`)
 
-    const branchResult = executeCommand('git rev-parse --abbrev-ref HEAD');
-    const branch = branchResult.success ? branchResult.output : 'main';
-
-    const pullResult = executeCommand(`git pull origin ${branch} 2>&1`);
-    
-    if (pullResult.success && !pullResult.output.includes('error') && !pullResult.output.includes('conflict')) {
-      updateText += `✅ *Pull exitoso*\n`;
-      if (pullResult.output && pullResult.output !== 'Already up to date.') {
-        updateText += `📝 *Cambios:*\n\`\`\`${pullResult.output.slice(-200)}\`\`\`\n\n`;
-      } else {
-        updateText += `📝 *Sin cambios nuevos*\n\n`;
-      }
+    const pull = execSafe(`git pull origin ${branch} 2>&1`)
+    if (!pull.success) {
+      await edit(`⚠️ Pull falló, forzando...\n⏳ git fetch --all && git reset --hard`)
+      execSafe('git fetch --all 2>&1')
+      execSafe(`git reset --hard origin/${branch} 2>&1`)
+      if (restoreConfig(configBackup)) await edit(`✅ Forzado exitoso\n🛡️ Config protegido\n\n📦 Instalando dependencias...`)
+      else await edit(`✅ Forzado exitoso\n\n📦 Instalando dependencias...`)
     } else {
-      updateText += `⚠️ Pull con problemas, forzando actualización...\n`;
-      await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
-      
-      const fetchResult = executeCommand('git fetch --all 2>&1');
-      const resetResult = executeCommand(`git reset --hard origin/${branch} 2>&1`);
-      
-      if (resetResult.success) {
-        updateText += `✅ *Forzado exitoso*\n\n`;
-        
-        if (restoreConfig(configBackup)) {
-          updateText += `🛡️ *Archivo optishield.json protegido y restaurado*\n\n`;
-        }
-      } else {
-        updateText += `❌ *Error al actualizar:*\n\`\`\`${resetResult.output.slice(-300)}\`\`\`\n\n`;
-        await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
-        return;
-      }
+      if (restoreConfig(configBackup)) await edit(`✅ Pull exitoso\n🛡️ Config protegido\n\n📦 Instalando dependencias...`)
+      else await edit(`✅ Pull exitoso\n\n📦 Instalando dependencias...`)
     }
   }
 
-  if (!noInstall && fs.existsSync(path.join(process.cwd(), 'package.json'))) {
-    updateText += `📦 *Instalando dependencias...*\n`;
-    await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
-
-    const installResult = executeCommand('npm install --production 2>&1', { timeout: 120000 });
-    
-    if (installResult.success) {
-      updateText += `✅ *Dependencias instaladas*\n\n`;
+  // 🔒 Instalar solo --production para evitar scripts maliciosos
+  if (!noInstall) {
+    await edit('📦 Instalando dependencias (solo producción)...')
+    const install = execSafe('npm install --production --no-audit --no-fund 2>&1', { timeout: 120000 })
+    if (!install.success) {
+      await edit(`⚠️ npm install con problemas:\n${install.output.slice(-200)}`)
     } else {
-      updateText += `⚠️ *Advertencia en npm install:*\n\`\`\`${installResult.output.slice(-200)}\`\`\`\n\n`;
+      await edit('✅ Dependencias instaladas correctamente')
     }
-  } else if (noInstall) {
-    updateText += `⏭️ *Instalación omitida (--no-install)*\n\n`;
-  } else {
-    updateText += `⏭️ *No se encontró package.json*\n\n`;
   }
 
-  updateText += 
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `✅ *Actualización completada*\n\n` +
-    `🔄 *Reiniciando en 3 segundos...*\n` +
-    `🛡️ OptiShield System`;
-
-  await sock.sendMessage(chatId, { text: updateText, edit: statusMsg.key });
-  await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+  await edit('✅ *Actualización completada*\n\n🔄 *Reiniciando en 3 segundos...*')
+  await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } }).catch(() => {})
 
   setTimeout(() => {
-    console.log('🔄 Reiniciando bot por actualización...');
-    process.exit(1);
-  }, 3000);
+    console.log('🔄 Reiniciando bot por actualización...')
+    process.exit(1)
+  }, 3000)
 }

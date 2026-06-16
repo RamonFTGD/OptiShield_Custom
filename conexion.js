@@ -90,7 +90,15 @@ const store = {
 };
 
 store.load();
-setInterval(() => store.save(), 10000);
+
+// Periodic save (every 30s) en lugar de cada 10s para reducir escrituras en disco
+setInterval(() => {
+  try {
+    store.save();
+  } catch (e) {
+    console.warn('⚠️ Error al guardar store:', e.message);
+  }
+}, 30000);
 
 function purgeClosedSessions(keys) {
   if (!keys?.sessions) return;
@@ -140,6 +148,9 @@ async function startConnection() {
     });
   };
 
+  let reconnectAttempt = 0;
+  const MAX_RECONNECT_DELAY = 30000;
+
   const connectionUpdate = async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -157,18 +168,27 @@ async function startConnection() {
         return;
       }
 
-      if (!reconnecting) {
+      if (!reconnecting && typeof global.reloadHandler === 'function') {
+        if (reconnectAttempt === 0) console.log('🔌 Conexión cerrada. Iniciando reconexión...');
         reconnecting = true;
+        reconnectAttempt++;
         purgeClosedSessions(state.keys);
-        console.log(`⏳ Reconectando... (${code || 'Desconocido'})`);
-        setTimeout(() => global.reloadHandler(true), 1000);
+        
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempt - 1), MAX_RECONNECT_DELAY);
+        console.log(`⏳ Reconectando... (${code || 'Desconocido'}) — intento ${reconnectAttempt} en ${(delay / 1000).toFixed(1)}s`);
+        
+        setTimeout(() => {
+          global.reloadHandler(true);
+          reconnecting = false;
+        }, delay);
       }
     }
 
     if (connection === 'open') {
       reconnecting = false;
+      reconnectAttempt = 0;
       console.log('✅ Conectado. Sincronizando historial...');
-      try { await global.conn.sendQueuedMessages(); } catch {}
+      try { await global.conn?.sendQueuedMessages?.(); } catch {}
     }
   };
 

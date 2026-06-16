@@ -1,2 +1,6 @@
 node_modules
 session
+tmp
+optishield.json
+config/
+*.backup*

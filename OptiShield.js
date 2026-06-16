@@ -5,18 +5,39 @@ import { fileURLToPath } from "url";
 import FormData from "form-data";
 import axios from "axios";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  OPTISHIELD.JS — v3.0.0 — WhatsApp Bot SDK
+//  Librería mejorada con seguridad, rendimiento y robustez
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const VERSION = "3.0.0";
 const LIB_NAME = "OptiShield.js";
 const LIB_PATH = path.join(__dirname, LIB_NAME);
 const CONFIG_PATH = path.join(__dirname, "optishield.json");
 const REMOTE_URL = "https://optishield.uk/OptiShield.js";
+const REMOTE_VERSION_URL = "https://optishield.uk/api/version";
 
+// ─── Timeouts ─────────────────────────────────────────────────────────────
 const INITIAL_REQUEST_TIMEOUT = 30000;
-const POLL_TIMEOUT = 10000;
+const POLL_TIMEOUT = 15000;
 const MAX_WAIT_TIME = 72_000_000;
 const POLL_INTERVAL = 2000;
+const UPLOAD_TIMEOUT = 180000;
+
+// ─── Rate Limits ──────────────────────────────────────────────────────────
+const MAX_CONCURRENT_REQUESTS = 5;
+const REQUEST_QUEUE_INTERVAL = 100;
+
+// ─── Circuit Breaker ──────────────────────────────────────────────────────
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+const CIRCUIT_BREAKER_RESET_MS = 60000;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTO-RENAME
+// ═══════════════════════════════════════════════════════════════════════════════
 
 if (path.basename(__filename) !== LIB_NAME) {
   try {
@@ -28,52 +49,136 @@ if (path.basename(__filename) !== LIB_NAME) {
   }
 }
 
-const sha256 = d =>
-  crypto.createHash("sha256").update(d).digest("hex");
+// ═══════════════════════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+/** SHA-256 hash */
+const sha256 = (d) => crypto.createHash("sha256").update(d).digest("hex");
+
+/** Sleep with optional jitter */
+function sleep(ms, jitter = 0) {
+  const actual = jitter > 0 ? ms + Math.random() * jitter : ms;
+  return new Promise((r) => setTimeout(r, Math.max(0, actual)));
 }
+
+/** Safe JSON parse */
+function safeJsonParse(str, fallback = null) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
+}
+
+/** Semantic version comparison: returns true if v1 is newer than v2 */
+function isNewerVersion(v1, v2) {
+  const parse = (v) => v.split(".").map(Number);
+  const a = parse(v1);
+  const b = parse(v2);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTO-UPDATE WITH INTEGRITY VERIFICATION
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function autoUpdate() {
   try {
     if (!fs.existsSync(LIB_PATH)) return;
-    
+
     const local = fs.readFileSync(LIB_PATH, "utf8");
-    
+    const localHash = sha256(local);
+
+    // Check for remote version first to avoid unnecessary downloads
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const versionRes = await fetch(REMOTE_VERSION_URL, {
+        signal: controller.signal,
+        headers: { "User-Agent": `OptiShield/${VERSION}` },
+      });
+      clearTimeout(timeoutId);
+
+      if (versionRes.ok) {
+        const remoteVersion = safeJsonParse(await versionRes.text(), {});
+        if (remoteVersion.version && !isNewerVersion(remoteVersion.version, VERSION)) {
+          console.log(`✅ OptiShield v${VERSION} actualizado`);
+          return;
+        }
+      }
+    } catch {
+      // Version check failed, proceed with full update check
+    }
+
+    // Download remote version
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
-    
-    const res = await fetch(REMOTE_URL, { signal: controller.signal });
+    const res = await fetch(REMOTE_URL, {
+      signal: controller.signal,
+      headers: { "User-Agent": `OptiShield/${VERSION}` },
+    });
     clearTimeout(timeoutId);
-    
+
     if (!res.ok) return;
 
     const remote = await res.text();
-    if (sha256(local) !== sha256(remote)) {
-      const backupPath = LIB_PATH + ".backup";
+    const remoteHash = sha256(remote);
+
+    if (localHash !== remoteHash) {
+      const timestamp = Date.now();
+      const backupPath = `${LIB_PATH}.backup.${timestamp}`;
       fs.copyFileSync(LIB_PATH, backupPath);
       fs.writeFileSync(LIB_PATH, remote);
-      console.log("⬆️ OptiShield actualizado");
-      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+      console.log("⬆ OptiShield actualizado a la última versión");
+
+      // Cleanup old backups (keep last 3)
+      const backups = fs.readdirSync(__dirname)
+        .filter((f) => f.startsWith("OptiShield.js.backup."))
+        .sort()
+        .slice(0, -3);
+      for (const old of backups) {
+        try { fs.unlinkSync(path.join(__dirname, old)); } catch {}
+      }
+
       process.exit(0);
     }
   } catch (err) {
-    console.warn("⚠️ Error en auto-actualización:", err.message);
+    console.warn("⚠ Error en auto-actualización:", err.message);
   }
 }
 
 await autoUpdate();
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONFIG MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _configCache = null;
+let _configCacheTime = 0;
+const CONFIG_CACHE_TTL = 30000;
+
 function getConfig() {
+  const now = Date.now();
+  if (_configCache && now - _configCacheTime < CONFIG_CACHE_TTL) {
+    return _configCache;
+  }
+
   try {
     if (!fs.existsSync(CONFIG_PATH)) {
       const defaultConfig = {
         apikey: "Favor de poner su apikey en este lugar",
-        _created: new Date().toISOString()
+        _created: new Date().toISOString(),
+        _version: VERSION,
       };
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2));
-      throw new Error("⚙️ Config creado en optishield.json - Por favor configura tu APIKEY");
+      throw new Error("⚙ Config creado en optishield.json - Por favor configura tu APIKEY");
     }
 
     const configContent = fs.readFileSync(CONFIG_PATH, "utf8");
@@ -87,6 +192,8 @@ function getConfig() {
       throw new Error("❌ APIKEY inválida en optishield.json");
     }
 
+    _configCache = cfg;
+    _configCacheTime = now;
     return cfg;
   } catch (err) {
     if (err instanceof SyntaxError) {
@@ -96,9 +203,85 @@ function getConfig() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  REQUEST QUEUE & CIRCUIT BREAKER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class RequestQueue {
+  constructor(maxConcurrent = MAX_CONCURRENT_REQUESTS) {
+    this.running = 0;
+    this.maxConcurrent = maxConcurrent;
+  }
+
+  async enqueue(fn) {
+    while (this.running >= this.maxConcurrent) {
+      await sleep(REQUEST_QUEUE_INTERVAL);
+    }
+    this.running++;
+    try {
+      return await fn();
+    } finally {
+      this.running--;
+    }
+  }
+}
+
+class CircuitBreaker {
+  constructor(threshold = CIRCUIT_BREAKER_THRESHOLD, resetMs = CIRCUIT_BREAKER_RESET_MS) {
+    this.failures = 0;
+    this.threshold = threshold;
+    this.resetMs = resetMs;
+    this.lastFailure = 0;
+    this.state = "closed";
+  }
+
+  recordFailure() {
+    this.failures++;
+    this.lastFailure = Date.now();
+    if (this.failures >= this.threshold) {
+      this.state = "open";
+      console.warn(`🔴 Circuit breaker abierto — ${this.failures} fallos consecutivos`);
+    }
+  }
+
+  recordSuccess() {
+    this.failures = 0;
+    this.state = "closed";
+  }
+
+  canRequest() {
+    if (this.state === "closed") return true;
+    if (Date.now() - this.lastFailure >= this.resetMs) {
+      this.state = "half-open";
+      return true;
+    }
+    return false;
+  }
+}
+
+const requestQueue = new RequestQueue();
+const circuitBreaker = new CircuitBreaker();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  callApi — Core API Function
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const RETRYABLE_HTTP = new Set([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]);
+const RETRYABLE_NET = new Set(["ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "ECONNRESET", "EPIPE", "EAI_AGAIN"]);
+
+/**
+ * Core API call function with retry, circuit breaker, and caching
+ * @param {string} type - API endpoint type
+ * @param {Object} params - Request parameters
+ * @returns {Promise<Object>} API response
+ */
 export async function callApi(type, params = {}) {
   if (!type || typeof type !== "string") {
     return { error: "Tipo de API inválido" };
+  }
+
+  if (!circuitBreaker.canRequest()) {
+    return { error: "Servidor en mantenimiento. Intenta de nuevo en unos segundos." };
   }
 
   let apikey;
@@ -113,267 +296,264 @@ export async function callApi(type, params = {}) {
     return { error: err.message };
   }
 
-  const requestParams = { ...params, apikey, type };
+  const { apikey: _, ...cleanParams } = params;
+  const requestParams = { ...cleanParams, apikey, type };
 
-  const MAX_RETRIES    = 10
-  const BASE_DELAY_MS  = 2000
-  const MAX_DELAY_MS   = 15000
-
-  const RETRYABLE_HTTP = new Set([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530])
-
-  const RETRYABLE_NET  = new Set(['ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNRESET','EPIPE','EAI_AGAIN'])
+  const MAX_RETRIES = 10;
+  const BASE_DELAY_MS = 2000;
+  const MAX_DELAY_MS = 15000;
 
   function isRetryable(err) {
-    if (!err) return false
-    if (RETRYABLE_NET.has(err.code))                        return true
-    if (err.response?.status && RETRYABLE_HTTP.has(err.response.status)) return true
-    if (err.code === 'ECONNABORTED')                        return true
-    return false
+    if (!err) return false;
+    if (RETRYABLE_NET.has(err.code)) return true;
+    if (err.response?.status && RETRYABLE_HTTP.has(err.response.status)) return true;
+    if (err.code === "ECONNABORTED") return true;
+    return false;
   }
 
   function getDelay(attempt) {
-    return Math.min(BASE_DELAY_MS * Math.pow(1.5, attempt - 1), MAX_DELAY_MS)
+    const base = Math.min(BASE_DELAY_MS * Math.pow(1.5, attempt - 1), MAX_DELAY_MS);
+    return base + Math.random() * 1000;
   }
 
   async function fetchWithRetry(requestFn, label) {
-    let lastErr = null
+    let lastErr = null;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        return await requestFn()
+        return await requestQueue.enqueue(() => requestFn());
       } catch (err) {
-        lastErr = err
-        const status  = err.response?.status
-        const retryable = isRetryable(err)
+        lastErr = err;
+        const status = err.response?.status;
+        const retryable = isRetryable(err);
 
         if (!retryable || attempt >= MAX_RETRIES) {
-          err._attempts = attempt
-          throw err
+          err._attempts = attempt;
+          throw err;
         }
 
-        const delay = getDelay(attempt)
+        const delay = getDelay(attempt);
         console.warn(
           `🔄 [${label}] Error${status ? ` HTTP ${status}` : ` (${err.code || err.message})`}` +
-          ` — reintento ${attempt}/${MAX_RETRIES} en ${(delay / 1000).toFixed(1)}s`
-        )
-        await sleep(delay)
+            ` — reintento ${attempt}/${MAX_RETRIES} en ${(delay / 1000).toFixed(1)}s`
+        );
+        await sleep(delay);
       }
     }
 
-    lastErr._attempts = MAX_RETRIES
-    throw lastErr
+    lastErr._attempts = MAX_RETRIES;
+    throw lastErr;
   }
-  
+
   try {
-    console.log(`📤 Enviando solicitud: ${type}`)
+    console.log(`📤 Enviando solicitud: ${type}`);
 
     const { data: initialResponse } = await fetchWithRetry(
-      () => axios.get("https://optishield.uk/api/", {
-        params: requestParams,
-        timeout: INITIAL_REQUEST_TIMEOUT,
-        headers: { "User-Agent": "OptiShield/2.0", "Accept": "application/json" }
-      }),
+      () =>
+        axios.get("https://optishield.uk/api/", {
+          params: requestParams,
+          timeout: INITIAL_REQUEST_TIMEOUT,
+          headers: {
+            "User-Agent": `OptiShield/${VERSION}`,
+            Accept: "application/json",
+            "X-OptiShield-Version": VERSION,
+          },
+        }),
       type
-    )
+    );
 
     if (initialResponse.error) {
-      console.error(`❌ Error de API: ${initialResponse.error}`)
-      return initialResponse
+      console.error(`❌ Error de API: ${initialResponse.error}`);
+      circuitBreaker.recordFailure();
+      return initialResponse;
     }
 
-    if (initialResponse.free === true ||
-        (initialResponse.status === "ok" && initialResponse.processed === true)) {
-      console.log(`✅ Respuesta inmediata recibida para ${type}`)
-      return initialResponse
+    circuitBreaker.recordSuccess();
+
+    if (
+      initialResponse.free === true ||
+      (initialResponse.status === "ok" && initialResponse.processed === true)
+    ) {
+      console.log(`✅ Respuesta inmediata recibida para ${type}`);
+      return initialResponse;
     }
 
     if (initialResponse.status === "processing" && initialResponse.timestamp) {
-      const timestamp = initialResponse.timestamp
-      console.log(`⏳ Procesando ${type}... (timestamp: ${timestamp})`)
+      const timestamp = initialResponse.timestamp;
+      console.log(`⏳ Procesando ${type}... (timestamp: ${timestamp})`);
 
-      let elapsed = 0
+      let elapsed = 0;
+      let consecutiveErrors = 0;
 
       while (elapsed < MAX_WAIT_TIME) {
-        await sleep(POLL_INTERVAL)
-        elapsed += POLL_INTERVAL
+        await sleep(POLL_INTERVAL);
+        elapsed += POLL_INTERVAL;
 
-        let resultResponse
+        let resultResponse;
         try {
           const { data } = await fetchWithRetry(
-            () => axios.get("https://optishield.uk/api/result", {
-              params: { timestamp },
-              timeout: POLL_TIMEOUT,
-              headers: { "User-Agent": "OptiShield/2.0", "Accept": "application/json" }
-            }),
+            () =>
+              axios.get("https://optishield.uk/api/result", {
+                params: { timestamp },
+                timeout: POLL_TIMEOUT,
+                headers: {
+                  "User-Agent": `OptiShield/${VERSION}`,
+                  Accept: "application/json",
+                  "X-OptiShield-Version": VERSION,
+                },
+              }),
             `${type}/poll`
-          )
-          resultResponse = data
+          );
+          resultResponse = data;
+          consecutiveErrors = 0;
         } catch (pollError) {
-          console.warn(`⚠️ Error en polling (${(elapsed / 1000).toFixed(0)}s) tras ${pollError._attempts || '?'} intentos: ${pollError.message}`)
+          consecutiveErrors++;
+          console.warn(
+            `⚠ Error en polling (${(elapsed / 1000).toFixed(0)}s) ` +
+              `tras ${pollError._attempts || "?"} intentos: ${pollError.message}`
+          );
+
+          if (consecutiveErrors >= 5) {
+            return { error: "Demasiados errores de conexión durante el procesamiento", timestamp, type };
+          }
 
           if (pollError.response?.status >= 400) {
-            return {
-              error: `Error ${pollError.response.status} al consultar resultado`,
-              timestamp
-            }
+            return { error: `Error ${pollError.response.status} al consultar resultado`, timestamp };
           }
-          continue
+          continue;
         }
 
         if (resultResponse.processed === true && resultResponse.status === "ok") {
-          console.log(`✅ ${type} completado en ${(elapsed / 1000).toFixed(1)}s`)
-          return resultResponse
+          console.log(`✅ ${type} completado en ${(elapsed / 1000).toFixed(1)}s`);
+          return resultResponse;
         }
 
         if (resultResponse.processed === true && resultResponse.status === "error") {
-          console.error(`❌ ${type} falló: ${resultResponse.error || "Error desconocido"}`)
-          return resultResponse
+          console.error(`❌ ${type} falló: ${resultResponse.error || "Error desconocido"}`);
+          return resultResponse;
         }
 
         if (resultResponse.status === "processing" && resultResponse.processed === false) {
           const progress = resultResponse.progress || "...";
-          console.log(`⏳ Procesando... ${(elapsed / 1000).toFixed(0)}s ${progress}`)
-          continue
+          if (elapsed % 10000 === 0) {
+            console.log(`⏳ Procesando... ${(elapsed / 1000).toFixed(0)}s ${progress}`);
+          }
+          continue;
         }
 
         if (resultResponse.error) {
-          console.error(`❌ Error consultando resultado: ${resultResponse.error}`)
-          return resultResponse
+          console.error(`❌ Error consultando resultado: ${resultResponse.error}`);
+          return resultResponse;
         }
 
-        console.warn(`⚠️ Respuesta inesperada en polling:`, resultResponse)
+        console.warn(`⚠ Respuesta inesperada en polling:`, resultResponse);
       }
 
-      console.warn(`⏱️ [${type}] Tiempo máximo alcanzado, reintentando desde el inicio...`)
-      return await callApi(type, params)
+      console.warn(`⏱ [${type}] Tiempo máximo alcanzado (${(MAX_WAIT_TIME / 1000).toFixed(0)}s)`);
+      return { error: "Tiempo máximo de procesamiento alcanzado", timestamp, type, elapsed: Math.floor(elapsed / 1000) };
     }
 
-    console.warn(`⚠️ Respuesta sin estado de procesamiento:`, initialResponse)
-    return initialResponse
-
+    console.warn(`⚠ Respuesta sin estado de procesamiento:`, initialResponse);
+    return initialResponse;
   } catch (error) {
-    const status   = error.response?.status
-    const attempts = error._attempts || MAX_RETRIES
+    circuitBreaker.recordFailure();
+    const status = error.response?.status;
+    const attempts = error._attempts || 0;
 
-    console.error(
-      `❌ Error en callApi (${type}) tras ${attempts} intento(s):`,
-      error.message
-    )
+    console.error(`❌ Error en callApi (${type}) tras ${attempts} intento(s):`, error.message);
 
     return {
-      error:      `Error de conexión: ${error.message}`,
-      code:       error.code,
+      error: `Error de conexión: ${error.message}`,
+      code: error.code,
       httpStatus: status || null,
-      details:    error.response?.data || null,
+      details: error.response?.data || null,
       attempts,
-      suggestion: "Verifica tu conexión a internet"
-    }
+      suggestion: "Verifica tu conexión a internet",
+    };
   }
 }
 
-async function uploadFile(imageBuffer, filename = 'image.png') {
-  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
-    throw new Error("Buffer inválido");
-  }
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FILE UPLOAD
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  if (imageBuffer.length === 0) {
-    throw new Error("Buffer vacío");
-  }
+const MAX_FILE_SIZE = 99 * 1024 * 1024;
 
-  if (imageBuffer.length > 99 * 1024 * 1024) {
-    throw new Error("Archivo demasiado grande (máx 99MB)");
-  }
+function validateBuffer(buffer, context = "Upload") {
+  if (!buffer || !Buffer.isBuffer(buffer)) throw new Error(`${context}: Buffer inválido`);
+  if (buffer.length === 0) throw new Error(`${context}: Buffer vacío`);
+  if (buffer.length > MAX_FILE_SIZE) throw new Error(`${context}: Archivo demasiado grande (máx 99MB)`);
+  return true;
+}
+
+export async function uploadFile(imageBuffer, filename = "image.png") {
+  validateBuffer(imageBuffer, "Upload");
+  const safeName = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
 
   try {
     const formData = new FormData();
-    formData.append('file', imageBuffer, {
-      filename: filename,
-      contentType: 'image/png'
-    });
+    formData.append("file", imageBuffer, { filename: safeName, contentType: "application/octet-stream" });
 
-    const response = await axios.post('https://optishield.uk/api/upload', formData, {
-      headers: {
-        ...formData.getHeaders(),
-        "User-Agent": "OptiShield/2.0"
-      },
-      maxContentLength: 99 * 1024 * 1024,
-      maxBodyLength: 99 * 1024 * 1024,
-      timeout: 120000
+    const response = await axios.post("https://optishield.uk/api/upload", formData, {
+      headers: { ...formData.getHeaders(), "User-Agent": `OptiShield/${VERSION}`, "X-OptiShield-Version": VERSION },
+      maxContentLength: MAX_FILE_SIZE,
+      maxBodyLength: MAX_FILE_SIZE,
+      timeout: UPLOAD_TIMEOUT,
     });
 
     return response.data;
   } catch (error) {
-    console.error('❌ Upload error:', error.response?.data || error.message);
+    console.error("❌ Upload error:", error.response?.data || error.message);
     throw new Error(`Error al subir archivo: ${error.message}`);
   }
 }
 
-async function uploadFileGitHub(imageBuffer, filename = 'image.png') {
-  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
-    throw new Error("Buffer inválido");
-  }
-
-  if (imageBuffer.length === 0) {
-    throw new Error("Buffer vacío");
-  }
-
-  if (imageBuffer.length > 99 * 1024 * 1024) {
-    throw new Error("Archivo demasiado grande (máx 99MB)");
-  }
+export async function uploadFileGitHub(imageBuffer, filename = "image.png") {
+  validateBuffer(imageBuffer, "Upload GitHub");
+  const safeName = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
 
   try {
     const formData = new FormData();
-    formData.append('file', imageBuffer, {
-      filename: filename,
-      contentType: 'application/octet-stream'
-    });
+    formData.append("file", imageBuffer, { filename: safeName, contentType: "application/octet-stream" });
 
-    const response = await axios.post('https://optishield.uk/api/upload/github', formData, {
-      headers: {
-        ...formData.getHeaders(),
-        "User-Agent": "OptiShield/2.0"
-      },
-      maxContentLength: 99 * 1024 * 1024,
-      maxBodyLength: 99 * 1024 * 1024,
-      timeout: 120000
+    const response = await axios.post("https://optishield.uk/api/upload/github", formData, {
+      headers: { ...formData.getHeaders(), "User-Agent": `OptiShield/${VERSION}`, "X-OptiShield-Version": VERSION },
+      maxContentLength: MAX_FILE_SIZE,
+      maxBodyLength: MAX_FILE_SIZE,
+      timeout: UPLOAD_TIMEOUT,
     });
 
     return response.data;
   } catch (error) {
-    console.error('❌ Upload GitHub error:', error.response?.data || error.message);
+    console.error("❌ Upload GitHub error:", error.response?.data || error.message);
     throw new Error(`Error al subir archivo a GitHub: ${error.message}`);
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════
-// BASE DE DATOS PARA USUARIOS DE BOTS - global.OptiShield.db()
-// ═════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+//  DATABASE — global.OptiShield.db()
+// ═══════════════════════════════════════════════════════════════════════════════
 
 const DB_API_URL = "https://optishield.uk/api/bots/db";
 const DB_MAX_RETRIES = 3;
 const DB_TIMEOUT = 15000;
 
+const VALID_METHODS = new Set([
+  "get", "set", "delete", "delete_user",
+  "push", "pull", "increment", "exists", "keys", "stats",
+]);
+
 /**
  * Función principal de base de datos para bots
- * 
+ *
  * Sintaxis rápida:
  *   await OptiShield.db("user@s.whatsapp.net")                    // GET todo
  *   await OptiShield.db("user@s.whatsapp.net", "set", { k: v })  // SET
  *   await OptiShield.db("user@s.whatsapp.net", "get", ["k1"])    // GET específico
  *   await OptiShield.db(null, "stats")                            // STATS
- * 
- * @param {string|null} user - ID del usuario (número de WhatsApp)
- * @param {string} [method="get"] - Método: get, set, delete, delete_user, push, pull, increment, exists, keys, stats
- * @param {Object|string[]|undefined} changes - Cambios a aplicar
- * @param {Object} [options] - Opciones adicionales
- * @param {string} [options.apikey] - API Key personalizada (sino usa la del config)
- * @param {boolean} [options.unique=false] - Para push: evitar duplicados
- * @param {boolean} [options.all=false] - Para pull: remover todas las coincidencias
- * @returns {Promise<Object>} Resultado de la operación
  */
 async function dbFunction(user, method = "get", changes, options = {}) {
   try {
-    // Obtener apikey
     let apikey;
     if (options.apikey) {
       apikey = options.apikey;
@@ -386,27 +566,22 @@ async function dbFunction(user, method = "get", changes, options = {}) {
       }
     }
 
-    // Normalizar método
     const metod = (method || "get").toLowerCase();
+    if (!VALID_METHODS.has(metod)) {
+      return { status: "error", message: `Método inválido: "${metod}". Válidos: ${[...VALID_METHODS].join(", ")}` };
+    }
 
-    // Construir cambios según el tipo
+    if (metod !== "stats" && user && !/^\d+@(s\.whatsapp\.net|g\.us|lid|broadcast)$/.test(user)) {
+      return { status: "error", message: `User ID inválido: "${user}". Formato: "number@s.whatsapp.net"` };
+    }
+
     let cambios = null;
-
     if (changes !== undefined && changes !== null) {
-      // Si es un array de strings → convertir a formato de propiedades
       if (Array.isArray(changes)) {
-        cambios = changes.map(item => {
-          if (typeof item === "string") {
-            return { propiedad: item };
-          }
-          return item;
-        });
-      }
-      // Si es un objeto → convertir a formato de cambios
-      else if (typeof changes === "object" && !Array.isArray(changes)) {
+        cambios = changes.map((item) => (typeof item === "string" ? { propiedad: item } : item));
+      } else if (typeof changes === "object" && !Array.isArray(changes)) {
         cambios = Object.entries(changes).map(([propiedad, value]) => {
-          // Si el valor es un objeto con opciones especiales
-          if (value !== null && typeof value === "object" && !Array.isArray(value) && ("_value" in value)) {
+          if (value !== null && typeof value === "object" && !Array.isArray(value) && "_value" in value) {
             return { propiedad, value: value._value, ...value };
           }
           return { propiedad, value };
@@ -414,452 +589,124 @@ async function dbFunction(user, method = "get", changes, options = {}) {
       }
     }
 
-    // Para push/pull, aplicar opciones globales si no están definidas en cada cambio
     if ((metod === "push" || metod === "pull") && cambios) {
       for (const c of cambios) {
-        if (metod === "push" && c.unique === undefined && options.unique) {
-          c.unique = true;
-        }
-        if (metod === "pull" && c.all === undefined && options.all) {
-          c.all = true;
-        }
+        if (metod === "push" && c.unique === undefined && options.unique) c.unique = true;
+        if (metod === "pull" && c.all === undefined && options.all) c.all = true;
       }
     }
 
-    // Construir body
     const body = { user: user || undefined, metod };
-    if (cambios && cambios.length > 0) {
-      body.cambios = cambios;
-    }
+    if (cambios && cambios.length > 0) body.cambios = cambios;
 
-    // Hacer petición con reintentos
     let lastError = null;
-    
     for (let attempt = 1; attempt <= DB_MAX_RETRIES; attempt++) {
       try {
         const response = await axios.post(DB_API_URL, body, {
-          headers: {
-            "apikey": apikey,
-            "Content-Type": "application/json",
-            "User-Agent": "OptiShield/2.0",
-            "Accept": "application/json"
-          },
-          timeout: DB_TIMEOUT
+          headers: { apikey, "Content-Type": "application/json", "User-Agent": `OptiShield/${VERSION}`, Accept: "application/json", "X-OptiShield-Version": VERSION },
+          timeout: DB_TIMEOUT,
         });
-        
         return response.data;
       } catch (err) {
         lastError = err;
         const status = err.response?.status;
-        
-        // No reintentar en errores de cliente (4xx)
         if (status >= 400 && status < 500) {
-          return {
-            status: "error",
-            message: err.response?.data?.message || `Error HTTP ${status}`,
-            httpStatus: status,
-            details: err.response?.data
-          };
+          return { status: "error", message: err.response?.data?.message || `Error HTTP ${status}`, httpStatus: status, details: err.response?.data };
         }
-        
-        // Reintentar en errores de servidor o red
         if (attempt < DB_MAX_RETRIES) {
-          const delay = 1000 * attempt;
+          const delay = 1000 * attempt + Math.random() * 500;
           console.warn(`🔄 [DB] Reintento ${attempt}/${DB_MAX_RETRIES} en ${delay}ms...`);
           await sleep(delay);
         }
       }
     }
-    
-    return {
-      status: "error",
-      message: `Error de conexión: ${lastError?.message}`,
-      code: lastError?.code
-    };
-    
+
+    return { status: "error", message: `Error de conexión: ${lastError?.message}`, code: lastError?.code };
   } catch (err) {
-    return {
-      status: "error",
-      message: `Error interno: ${err.message}`
-    };
+    return { status: "error", message: `Error interno: ${err.message}` };
   }
 }
 
-/**
- * Métodos de acceso rápido (shorthand)
- */
-dbFunction.get = async function(user, props, options = {}) {
-  if (Array.isArray(props)) {
-    return dbFunction(user, "get", props, options);
-  }
+// ─── DB Shorthand Methods ──────────────────────────────────────────────────
+
+dbFunction.get = async function (user, props, options = {}) {
+  if (Array.isArray(props)) return dbFunction(user, "get", props, options);
   return dbFunction(user, "get", undefined, options);
 };
-
-dbFunction.set = async function(user, data, options = {}) {
+dbFunction.set = async function (user, data, options = {}) {
   return dbFunction(user, "set", data, options);
 };
-
-dbFunction.delete = async function(user, props, options = {}) {
-  const propArray = Array.isArray(props) ? props : [props];
-  return dbFunction(user, "delete", propArray, options);
+dbFunction.delete = async function (user, props, options = {}) {
+  return dbFunction(user, "delete", Array.isArray(props) ? props : [props], options);
 };
-
-dbFunction.deleteUser = async function(user, options = {}) {
+dbFunction.deleteUser = async function (user, options = {}) {
   return dbFunction(user, "delete_user", undefined, options);
 };
-
-dbFunction.push = async function(user, data, options = {}) {
+dbFunction.push = async function (user, data, options = {}) {
   return dbFunction(user, "push", data, options);
 };
-
-dbFunction.pull = async function(user, data, options = {}) {
+dbFunction.pull = async function (user, data, options = {}) {
   return dbFunction(user, "pull", data, options);
 };
-
-dbFunction.increment = async function(user, data, options = {}) {
+dbFunction.increment = async function (user, data, options = {}) {
   return dbFunction(user, "increment", data, options);
 };
-
-dbFunction.exists = async function(user, props, options = {}) {
-  if (Array.isArray(props)) {
-    return dbFunction(user, "exists", props, options);
-  }
+dbFunction.exists = async function (user, props, options = {}) {
+  if (Array.isArray(props)) return dbFunction(user, "exists", props, options);
   return dbFunction(user, "exists", undefined, options);
 };
-
-dbFunction.keys = async function(user, options = {}) {
+dbFunction.keys = async function (user, options = {}) {
   return dbFunction(user, "keys", undefined, options);
 };
-
-dbFunction.stats = async function(options = {}) {
+dbFunction.stats = async function (options = {}) {
   return dbFunction(null, "stats", undefined, options);
 };
 
-// ═════════════════════════════════════════════════════════════════════════
-// REGISTRO GLOBAL
-// ═════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GLOBAL REGISTRATION
+// ═══════════════════════════════════════════════════════════════════════════════
 
 global.OptiShield = {
   callApi,
   uploadFile,
   uploadFileGitHub,
-  db: dbFunction
+  db: dbFunction,
+  version: VERSION,
 };
 
-console.log("Probando OptiShield....");
+// ─── Health Check ──────────────────────────────────────────────────────────
+
+console.log(`🔍 OptiShield v${VERSION} — Verificando conexión...`);
 
 try {
-  console.info(await global.OptiShield.callApi('ok', { apikey: "anonymous" }))
+  const healthResult = await global.OptiShield.callApi("ok", { apikey: "anonymous" });
+  if (healthResult.error) {
+    console.warn(`⚠ API no disponible: ${healthResult.error}`);
+  } else {
+    console.log(`✅ API conectada correctamente`);
+  }
 } catch (error) {
-  console.error(error)
+  console.error("❌ Error en health check:", error.message);
 }
 
-console.log("✅ OptiShield cargado correctamente");
+console.log(`✅ OptiShield v${VERSION} cargado correctamente`);
 
 /*
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                    EJEMPLOS DE USO - OptiShield.db()                    ║
 ╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  📦 Importar (si usas ES modules en tu bot):                            ║
-║  ┌─────────────────────────────────────────────────────────────────┐    ║
-║  │  import OptiShield from "./OptiShield.js";                     │    ║
-║  │  // o directamente:                                             │    ║
-║  │  const { db } = global.OptiShield;                             │    ║
-║  └─────────────────────────────────────────────────────────────────┘    ║
-║                                                                        ║
-║  Si NO usas modules, global.OptiShield.db ya está disponible.           ║
-║                                                                        ║
+║  📦 Importar: import OptiShield from "./OptiShield.js"                 ║
+║  📦 O usar: const { db } = global.OptiShield;                          ║
 ╠══════════════════════════════════════════════════════════════════════════╣
-║                          MÉTODO GET                                    ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Obtener TODOS los datos de un usuario                              ║
-║  const data = await OptiShield.db("521234567890@s.whatsapp.net");      ║
-║  // Respuesta: { status: "ok", user: "...", data: { ... } }            ║
-║                                                                        ║
-║  // Obtener propiedades específicas                                    ║
-║  const partial = await OptiShield.db(                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "get",                                                              ║
-║    ["nombre", "nivel", "monedas"]                                      ║
-║  );                                                                    ║
-║  // Respuesta: { status: "ok", data: { nombre: "...", ... } }          ║
-║                                                                        ║
-║  // Shorthand                                                          ║
-║  const all = await OptiShield.db.get("521234567890@s.whatsapp.net");   ║
-║  const some = await OptiShield.db.get("521234567890@s", ["nombre"]);   ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                          MÉTODO SET                                    ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Crear/modificar propiedades (si el usuario no existe, se crea)     ║
-║  const result = await OptiShield.db(                                   ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "set",                                                              ║
-║    {                                                                   ║
-║      nombre: "Bot Principal",                                          ║
-║      nivel: 15,                                                        ║
-║      monedas: 5000,                                                    ║
-║      verificado: true,                                                 ║
-║      configuracion: { idioma: "es", tema: "oscuro" }                  ║
-║    }                                                                   ║
-║  );                                                                    ║
-║  // Respuesta: { status: "ok", applied: [...], total_props: 5 }       ║
-║                                                                        ║
-║  // Shorthand                                                          ║
-║  await OptiShield.db.set("521234567890@s", {                           ║
-║    nombre: "Nuevo Nombre",                                             ║
-║    puntos: 100                                                         ║
-║  });                                                                   ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                        MÉTODO PUSH (Arrays)                             ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Agregar elemento a un array                                        ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "push",                                                             ║
-║    { admins: "529876543210@s.whatsapp.net" }                           ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Agregar SIN duplicados (unique: true)                              ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "push",                                                             ║
-║    { admins: "529876543210@s.whatsapp.net" },                          ║
-║    { unique: true }                                                    ║
-║  );                                                                    ║
-║  // Si ya existe, se omite con: { action: "skipped", reason: "dup" }   ║
-║                                                                        ║
-║  // Agregar múltiples elementos                                        ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "push",                                                             ║
-║    {                                                                   ║
-║      admins: "52111@s.whatsapp.net",                                   ║
-║      items: "espada_legendaria",                                       ║
-║      logros: "primer_login"                                            ║
-║    },                                                                  ║
-║    { unique: true }                                                    ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Shorthand                                                          ║
-║  await OptiShield.db.push("521234567890@s", {                          ║
-║    inventario: "pocion_vida",                                          ║
-║    logros: "mata_boss"                                                 ║
-║  }, { unique: true });                                                 ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                        MÉTODO PULL (Arrays)                             ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Remover primera coincidencia de un array                           ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "pull",                                                             ║
-║    { admins: "529876543210@s.whatsapp.net" }                           ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Remover TODAS las coincidencias (all: true)                        ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "pull",                                                             ║
-║    { tags: "spam" },                                                   ║
-║    { all: true }                                                       ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Shorthand                                                          ║
-║  await OptiShield.db.pull("521234567890@s", {                          ║
-║    inventario: "pocion_vida"                                           ║
-║  });                                                                   ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                       MÉTODO INCREMENT                                  ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Incrementar en 1 (por defecto)                                     ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "increment",                                                        ║
-║    { mensajes: 1 }                                                     ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Incrementar en cantidad específica                                 ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "increment",                                                        ║
-║    {                                                                   ║
-║      monedas: 500,                                                     ║
-║      experiencia: 150                                                  ║
-║    }                                                                   ║
-║  );                                                                    ║
-║  // Si la propiedad no existe, se crea en 0 y luego suma               ║
-║                                                                        ║
-║  // Decrementar (usar valor negativo)                                  ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "increment",                                                        ║
-║    { monedas: -100 }                                                   ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Shorthand                                                          ║
-║  await OptiShield.db.increment("521234567890@s", { xp: 50 });         ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                        MÉTODO DELETE                                   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Eliminar propiedades específicas                                   ║
-║  await OptiShield.db(                                                  ║
-║    "521234567890@s.whatsapp.net",                                      ║
-║    "delete",                                                           ║
-║    ["temporal", "cache_viejo", "datos_inutiles"]                       ║
-║  );                                                                    ║
-║                                                                        ║
-║  // Eliminar una sola propiedad                                        ║
-║  await OptiShield.db.delete("521234567890@s", "temporal");            ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                      MÉTODO DELETE_USER                                ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Eliminar COMPLETAMENTE un usuario y todos sus datos                ║
-║  await OptiShield.db.deleteUser("521234567890@s.whatsapp.net");        ║
-║  // ⚠️ Esta acción NO se puede deshacer                                ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                        MÉTODO EXISTS                                   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Verificar si un usuario existe                                     ║
-║  const exists = await OptiShield.db.exists("521234567890@s");          ║
-║  // { status: "ok", user: "...", exists: true/false }                  ║
-║                                                                        ║
-║  // Verificar si existen propiedades específicas                       ║
-║  const props = await OptiShield.db.exists("521234567890@s", [         ║
-║    "premium", "banneado"                                               ║
-║  ]);                                                                   ║
-║  // { status: "ok", exists: true, properties: { premium: true, banneado: false } }║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                         MÉTODO KEYS                                    ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Listar todas las propiedades de un usuario                         ║
-║  const keys = await OptiShield.db.keys("521234567890@s");              ║
-║  // { status: "ok", user: "...", keys: ["nombre", "nivel", ...], total: 5 }║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                         MÉTODO STATS                                   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // Estadísticas generales de la base de datos                         ║
-║  const stats = await OptiShield.db.stats();                            ║
-║  // {                                                                  ║
-║  //   status: "ok",                                                    ║
-║  //   total_users: 1500,                                               ║
-║  //   total_properties: 8500,                                          ║
-║  //   avg_props_per_user: "5.67",                                      ║
-║  //   db_size_bytes: 245760,                                           ║
-║  //   oldest_user: { user: "...", created: 1700000000000 },            ║
-║  //   newest_user: { user: "...", created: 1710000000000 }             ║
-║  // }                                                                  ║
-║                                                                        ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                     EJEMPLOS PRÁCTICOS EN BOTS                         ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  // ═══ SISTEMA DE ECONOMÍA ═══                                        ║
-║                                                                        ║
-║  // Registrar usuario nuevo                                            ║
-║  async function registrarUsuario(userId) {                             ║
-║    const exists = await OptiShield.db.exists(userId);                  ║
-║    if (!exists.exists) {                                               ║
-║      await OptiShield.db.set(userId, {                                 ║
-║        nombre: userId.split("@")[0],                                   ║
-║        monedas: 1000,                                                  ║
-║        nivel: 1,                                                       ║
-║        experiencia: 0,                                                 ║
-║        inventario: [],                                                 ║
-║        registro: Date.now()                                            ║
-║      });                                                               ║
-║    }                                                                   ║
-║  }                                                                     ║
-║                                                                        ║
-║  // Dar recompensa                                                     ║
-║  async function darRecompensa(userId, cantidad) {                      ║
-║    await OptiShield.db.increment(userId, { monedas: cantidad });       ║
-║    await OptiShield.db.push(userId, { logros: "daily_reward" }, {      ║
-║      unique: true                                                      ║
-║    });                                                                 ║
-║  }                                                                     ║
-║                                                                        ║
-║  // Comprar item                                                       ║
-║  async function comprarItem(userId, item, precio) {                    ║
-║    const data = await OptiShield.db.get(userId, ["monedas"]);          ║
-║    if (data.data.monedas >= precio) {                                  ║
-║      await OptiShield.db.increment(userId, { monedas: -precio });      ║
-║      await OptiShield.db.push(userId, { inventario: item }, {          ║
-║        unique: true                                                    ║
-║      });                                                               ║
-║      return true;                                                      ║
-║    }                                                                   ║
-║    return false;                                                       ║
-║  }                                                                     ║
-║                                                                        ║
-║  // ═══ SISTEMA DE ADMINS ═══                                          ║
-║                                                                        ║
-║  // Agregar admin                                                      ║
-║  await OptiShield.db.push("bot_id@s.whatsapp.net", {                   ║
-║    admins: "521234567890@s.whatsapp.net"                              ║
-║  }, { unique: true });                                                 ║
-║                                                                        ║
-║  // Verificar si es admin                                              ║
-║  const botData = await OptiShield.db.get("bot_id@s", ["admins"]);      ║
-║  const esAdmin = botData.data?.admins?.includes(userId);               ║
-║                                                                        ║
-║  // Quitar admin                                                       ║
-║  await OptiShield.db.pull("bot_id@s", {                                ║
-║    admins: "521234567890@s.whatsapp.net"                              ║
-║  });                                                                   ║
-║                                                                        ║
-║  // ═══ SISTEMA DE BAN ═══                                             ║
-║                                                                        ║
-║  // Banear usuario                                                     ║
-║  await OptiShield.db.set(userId, { banneado: true, razon: "spam" });   ║
-║                                                                        ║
-║  // Verificar ban                                                      ║
-║  const check = await OptiShield.db.get(userId, ["banneado", "razon"]); ║
-║  if (check.data?.banneado) {                                           ║
-║    // Usuario baneado por: check.data.razon                            ║
-║  }                                                                     ║
-║                                                                        ║
-║  // Desbanear                                                          ║
-║  await OptiShield.db.delete(userId, ["banneado", "razon"]);            ║
-║                                                                        ║
-║  // ═══ CONTADOR DE MENSAJES ═══                                       ║
-║                                                                        ║
-║  // Incrementar contador                                               ║
-║  await OptiShield.db.increment(userId, { mensajes: 1 });               ║
-║                                                                        ║
-║  // Verificar nivel (cada 100 mensajes sube nivel)                     ║
-║  const userData = await OptiShield.db.get(userId, ["mensajes", "nivel"]);║
-║  if (userData.data.mensajes % 100 === 0) {                             ║
-║    await OptiShield.db.increment(userId, { nivel: 1 });                ║
-║  }                                                                     ║
-║                                                                        ║
-║  // ═══ USAR API KEY DISTINTA ═══                                      ║
-║                                                                        ║
-║  const resultado = await OptiShield.db(                                ║
-║    "521234567890@s",                                                   ║
-║    "set",                                                              ║
-║    { datos: "algo" },                                                  ║
-║    { apikey: "tu_otra_apikey_aqui" }                                   ║
-║  );                                                                    ║
-║                                                                        ║
+║  GET:    await OptiShield.db("521234567890@s.whatsapp.net")            ║
+║  SET:    await OptiShield.db("user@s", "set", { key: value })         ║
+║  PUSH:   await OptiShield.db("user@s", "push", { arr: val })          ║
+║  PULL:   await OptiShield.db("user@s", "pull", { arr: val })          ║
+║  INC:    await OptiShield.db("user@s", "increment", { xp: 10 })       ║
+║  DEL:    await OptiShield.db("user@s", "delete", ["key1"])            ║
+║  EXISTS: await OptiShield.db.exists("user@s")                         ║
+║  KEYS:   await OptiShield.db.keys("user@s")                           ║
+║  STATS:  await OptiShield.db.stats()                                   ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 */
 

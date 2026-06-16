@@ -8,7 +8,8 @@ export const meta = {
   priority: 5,
   premium: true,
   class: 'Buscadores',
-  public: true
+  public: true,
+  description: 'Genera memes por categoría (30+ categorías)',
 }
 
 const MEME_CATEGORIES = [
@@ -49,7 +50,6 @@ export default async function (msg, sock, ctx) {
   const query  = ctx.args.join(' ').trim()
 
   if (!query) {
-
     const sections = []
     const chunkSize = 10
     for (let i = 0; i < MEME_CATEGORIES.length; i += chunkSize) {
@@ -63,48 +63,44 @@ export default async function (msg, sock, ctx) {
         }))
       })
     }
-
     await sendInteractiveMessage(sock, jid, {
       title: '😂 Memes',
       text:
-        `😂 *BUSCADOR DE MEMES*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📊 *${MEME_CATEGORIES.length} categorías disponibles*\n\n` +
-        `Selecciona una categoría o escribe:\n` +
-        `*.meme <tema personalizado>*\n\n` +
-        `_Ejemplo: .meme trabajo lunes_`,
+        `😂 *Memes*
+${'─'.repeat(28)}
+${MEME_CATEGORIES.length} categorías disponibles.
+
+◆ .meme <categoría> — Por categoría
+◆ .meme <tema> — Búsqueda personalizada
+
+◆ .meme programación
+
+⚡ OptiShield Memes`,
       footer: 'OptiShield • Memes 😂',
-      interactiveButtons: [
-        {
-          name: 'single_select',
-          buttonParamsJson: JSON.stringify({
-            title: '😂 Elegir categoría',
-            sections
-          })
-        }
-      ]
+      interactiveButtons: [{
+        name: 'single_select',
+        buttonParamsJson: JSON.stringify({
+          title: '😂 Elegir categoría',
+          sections
+        })
+      }]
     })
     return true
   }
-
-  await sock.sendMessage(jid, { text: `⏳ Buscando meme de *${query}*...` }, { quoted: msg })
 
   try {
     const category = MEME_CATEGORIES.find(c => c.name.toLowerCase() === query.toLowerCase())
     const searchQuery = category ? category.query : `memes ${query} graciosos español`
 
     const res = await global.OptiShield.callApi('pinterestSearch', { query: searchQuery })
-
     if (res.error || !res?.result?.ok || !res.result.results?.length) {
-      await sock.sendMessage(jid, {
-        text: `❌ No se encontraron memes de *"${query}"*\n\n💡 Usa *.meme* para ver las categorías`
-      }, { quoted: msg })
+      await sock.sendMessage(jid, { text: `❌ No se encontraron memes de "${query}"` }, { quoted: msg })
       return true
     }
 
     const images = res.result.results.filter(r => typeof r.archivo === 'string' && !r.video)
     if (!images.length) {
-      await sock.sendMessage(jid, { text: `⚠️ No hay memes válidos para *"${query}"*` }, { quoted: msg })
+      await sock.sendMessage(jid, { text: `⚠️ No hay memes válidos para "${query}"` }, { quoted: msg })
       return true
     }
 
@@ -115,16 +111,15 @@ export default async function (msg, sock, ctx) {
     await sock.sendMessage(jid, {
       image: { url: randomMeme.archivo },
       caption:
-        `${emoji} *Meme de ${categoryName}*\n\n` +
-        `🎲 Aleatorio de ${images.length}+ resultados\n` +
-        `💡 *.meme ${categoryName}* para otro\n` +
-        `📋 *.meme* para ver categorías`
+        `${emoji} *${categoryName}*\n\n` +
+        `🎲 ${images.length}+ memes disponibles\n` +
+        `💡 .meme ${categoryName} — Otro\n` +
+        `📋 .meme — Ver categorías`
     }, { quoted: msg })
 
   } catch (err) {
     console.error('❌ meme error:', err)
     await sock.sendMessage(jid, { text: '❌ Error: ' + err.message }, { quoted: msg })
   }
-
   return true
 }
