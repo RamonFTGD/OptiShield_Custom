@@ -110,18 +110,23 @@ function generateMessage(info, apiData, whatsappLatency, editCount = 1) {
   const userReqs = info?.user?.requests || 0
 
   let messageText =
-    ` *INFORMACIÓN DEL SISTEMA* 🔄\n` +
-    `━━━━━━━━━━━━━━\n` +
-    `👤 *Owner:* ${userName}\n` +
-    `🎟️ *Solicitudes:* ${userReqs}\n` +
-    `📊 *Ediciones:* ${editCount}/10\n\n` +
-    `⚡ *Latencias*\n• WhatsApp: ${whatsappLatency} ms\n• API: ${apiData.latency} ms ${apiData.status}\n\n` +
-    `🖥️ *Sistema*\n• SO: ${os.type()} ${os.release()}\n• Arq: ${os.arch()}\n• Uptime: ${uptime}\n\n` +
-    `🧠 *CPU*\n• ${cpuModel}\n• Uso: ${cpuUsage}% ${bar(cpuUsage)}\n• Temp: ${cpuTemp === 'N/A' ? '❓' : `🟢 ${cpuTemp}°C`}\n\n` +
-    `🧮 *RAM*\n• ${formatMB(mem.usedRam)} / ${formatMB(mem.totalRam)} MB\n• Uso: ${ramPercent}% ${bar(ramPercent)}\n\n` +
-    `🗄️ *Swap*\n• ${formatMB(mem.usedSwap)} / ${formatMB(mem.totalSwap)} MB\n• Uso: ${swapPercent}% ${bar(swapPercent)}\n\n` +
-    `💾 *Disco*\n• ${formatGB(diskUsed)} / ${formatGB(diskTotal)} GB\n• Uso: ${diskPercent}% ${bar(diskPercent)}\n\n` +
-    `🛡️ OptiShield System | Actualización en vivo`
+    `╔═════ 「 *STATUS* 」 ═════╗\n` +
+    `║ 👤 *Usuario:* ${userName}\n` +
+    `║ 🎟️ *Solicitudes:* ${userReqs}\n` +
+    `║ 📊 *Sync:* ${editCount}/10\n` +
+    `╠═════════════════════════╣\n` +
+    `║ ⚡ *LATENCIA*\n` +
+    `║ ▸ WhatsApp: ${whatsappLatency} ms\n` +
+    `║ ▸ API: ${apiData.latency} ms ${apiData.status}\n` +
+    `╠═════════════════════════╣\n` +
+    `║ 🖥️ *SISTEMA*\n` +
+    `║ ▸ SO: ${os.type()} (${os.arch()})\n` +
+    `║ ▸ Uptime: ${uptime}\n` +
+    `║ ▸ CPU: ${cpuUsage}% ${bar(cpuUsage)}\n` +
+    `║ ▸ RAM: ${ramPercent}% ${bar(ramPercent)}\n` +
+    `║ ▸ Disco: ${diskPercent}% ${bar(diskPercent)}\n` +
+    `╚═════════════════════════╝\n` +
+    `🛡️ _OptiShield System Online_`
 
   return messageText
 }
