@@ -120,6 +120,7 @@ function generateMessage(info, apiData, whatsappLatency, editCount = 1) {
     `║ ▸ API: ${apiData.latency} ms ${apiData.status}\n` +
     `╠═════════════════════════╣\n` +
     `║ 🖥️ *SISTEMA*\n` +
+    `║ ▸ SO: ${os.type()} (${os.arch()})\n` +
     `║ ▸ Uptime: ${uptime}\n` +
     `║ ▸ CPU: ${cpuUsage}% ${bar(cpuUsage)}\n` +
     `║ ▸ RAM: ${ramPercent}% ${bar(ramPercent)}\n` +

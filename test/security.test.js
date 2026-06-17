@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { getUserLevel, hasPermission, LEVELS, isValidJid, getLevelName } from '../lib/security.js';
 import { getUserLevel, hasPermission, LEVELS, isValidJid } from '../lib/security.js';
 
 describe('Security Functions', () => {
