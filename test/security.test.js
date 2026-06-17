@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { getUserLevel, hasPermission, LEVELS, isValidJid, getLevelName } from '../lib/security.js';
+import { getUserLevel, hasPermission, LEVELS, isValidJid } from '../lib/security.js';
 
 describe('Security Functions', () => {
   describe('getUserLevel', () => {
@@ -9,7 +10,8 @@ describe('Security Functions', () => {
   });
 
   describe('getLevelName', () => {
-    it('should return the correct level name', () => {
+    it('should return the correct level name', async () => {
+      const { getLevelName } = await import('../lib/security.js');
       expect(getLevelName(LEVELS.USER)).to.equal('👤 Usuario');
       expect(getLevelName(LEVELS.OWNER)).to.equal('👑 Owner');
       expect(getLevelName(999)).to.equal('👤 Usuario');

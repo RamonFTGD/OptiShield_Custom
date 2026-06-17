@@ -2,7 +2,7 @@ import { getUserLevel, getLevelName } from '../../lib/security.js'
 
 export const meta = {
   name: 'lid',
-  commands: ['lid', 'userinfo'],
+  commands: ['lid', 'userinfo', 'me'],
   priority: 5,
   class: 'Sistema',
   desc: 'Muestra la información del usuario que utilizó el comando',

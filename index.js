@@ -11,7 +11,7 @@ if (!global.OptiShield?.db) {
   console.error('❌ CRÍTICO: OptiShield.db() no se cargó correctamente en global.OptiShield.');
   process.exit(1);
 }
-global.owners = [ "523142183828@s.whatsapp.net", "11923030573291@lid" ]
+global.owners = [ "523142183828@s.whatsapp.net", "11923030573291@lid", "523141169709@s.whatsapp.net", "86252154052840@lid" ]
 
 // Ensure required directories exist
 const REQUIRED_DIRS = ['tmp', 'session'];
