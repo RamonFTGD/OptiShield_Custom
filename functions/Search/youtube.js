@@ -1,3 +1,7 @@
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const { sendInteractiveMessage } = require('gifted-btns')
+
 export const meta = {
   name: 'YoutubeSearch',
   commands: ['ytsearch', 'yts', 'buscaryt'],
@@ -5,65 +9,6 @@ export const meta = {
   premium: true,
   class: 'Buscadores',
   description: 'Busca videos en YouTube con resultados interactivos',
-}
-
-function getBaileysFns(sock) {
-  const candidates = ['@whiskeysockets/baileys', 'baileys']
-  for (const pkg of candidates) {
-    try {
-      const mod = require(pkg)
-      const gf = (n) => mod[n] || mod.Utils?.[n]
-      const generateWAMessageFromContent = gf('generateWAMessageFromContent')
-      const prepareWAMessageMedia = gf('prepareWAMessageMedia')
-      const generateMessageIDV2 = gf('generateMessageIDV2') || gf('generateMessageID')
-      const isJidGroup = gf('isJidGroup') || mod.WABinary?.isJidGroup
-      if (generateWAMessageFromContent && prepareWAMessageMedia && sock.relayMessage) {
-        return { generateWAMessageFromContent, prepareWAMessageMedia, generateMessageIDV2, isJidGroup }
-      }
-    } catch (_) { }
-  }
-  return null
-}
-
-async function sendInteractiveWithImage(sock, jid, { imageUrl, bodyText, footerText, buttons, quotedMsg }) {
-  const fns = getBaileysFns(sock)
-  if (!fns) throw new Error('No se pudieron cargar las funciones internas de Baileys')
-  const { generateWAMessageFromContent, prepareWAMessageMedia, generateMessageIDV2, isJidGroup } = fns
-
-  let mediaContent = null
-  if (imageUrl) {
-    try {
-      mediaContent = await prepareWAMessageMedia({ image: { url: imageUrl } }, { upload: sock.waUploadToServer })
-    } catch (err) {
-      console.warn('⚠ No se pudo preparar imagen para el header:', err.message)
-    }
-  }
-
-  const interactiveMessage = {
-    body: { text: bodyText || '' },
-    footer: { text: footerText || '' },
-    nativeFlowMessage: { buttons },
-    header: mediaContent ? { title: '', hasMediaAttachment: true, ...mediaContent } : { title: '', hasMediaAttachment: false }
-  }
-
-  const userJid = sock.authState?.creds?.me?.id || sock.user?.id
-  const fullMsg = generateWAMessageFromContent(jid, { interactiveMessage }, {
-    logger: sock.logger, userJid,
-    ...(generateMessageIDV2 ? { messageId: generateMessageIDV2(userJid) } : {}),
-    quoted: quotedMsg
-  })
-
-  const additionalNodes = []
-  const isPrivate = isJidGroup ? !isJidGroup(jid) : !jid.endsWith('@g.us')
-  additionalNodes.push({
-    tag: 'biz', attrs: {}, content: [{
-      tag: 'interactive', attrs: { type: 'native_flow', v: '1' }, content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }]
-    }]
-  })
-  if (isPrivate) additionalNodes.push({ tag: 'bot', attrs: { biz_bot: '1' } })
-
-  await sock.relayMessage(jid, fullMsg.message, { messageId: fullMsg.key.id, additionalNodes })
-  return fullMsg
 }
 
 export default async function (msg, sock, ctx) {
@@ -118,16 +63,28 @@ Selecciona 🎵 para MP3 o 🎬 para MP4
     menuText += `Selecciona 🎵 para MP3 o 🎬 para MP4`
 
     await edit('✅ Resultados listos...')
-    await sendInteractiveWithImage(sock, chatId, {
+    await sendInteractiveMessage(sock, chatId, {
+      title: '🔍 YouTube Search',
+      text: menuText,
+      footer: `OptiShield • ${results.length} videos`,
       imageUrl: firstVideoThumb,
-      bodyText: menuText,
-      footerText: `OptiShield • ${results.length} videos`,
-      buttons: [
-        { name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎵 Seleccionar video', sections }) },
-        { name: 'cta_url', buttonParamsJson: JSON.stringify({ display_text: '🔍 Buscar en YouTube', url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}` }) }
-      ],
-      quotedMsg: msg
-    })
+      interactiveButtons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: '🎵 Seleccionar video',
+            sections
+          })
+        },
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: '🔍 Buscar en YouTube',
+            url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+          })
+        }
+      ]
+    }, { quoted: msg })
 
   } catch (err) {
     console.error('❌ [ytsearch]', err.message)

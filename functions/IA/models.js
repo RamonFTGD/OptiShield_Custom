@@ -60,7 +60,16 @@ export default async function (msg, sock, ctx) {
     const { key: logKey } = await sock.sendMessage(chatId, { text: `${model.emoji} Consultando ${model.name}...` }, { quoted: msg })
 
     try {
-      const res = await global.OptiShield.callApi(model.api, { prompt })
+      const apiParams = { prompt }
+      if (['gemini', 'felo', 'gita', 'mova'].includes(model.api)) {
+        apiParams.text = prompt
+        delete apiParams.prompt
+      } else if (model.api === 'OptiShield') {
+        apiParams.mensaje = prompt
+        delete apiParams.prompt
+      }
+
+      const res = await global.OptiShield.callApi(model.api, apiParams)
 
       if (res.error) {
         await sock.sendMessage(chatId, { text: `❌ ${res.error}`, edit: logKey })
